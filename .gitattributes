@@ -1,0 +1,25 @@
+# Compiled Java 21 fixtures. These are the byte-exact input to the differential
+# test, so no filter may go near them. Git's auto-detection already classifies
+# them as binary, since a class file has NUL bytes within the first few dozen;
+# declaring it makes that a guarantee instead of a heuristic that has to keep
+# being right on every contributor's machine.
+*.classdata binary
+
+# The wrapper jar, for the same reason.
+*.jar binary
+
+# The text half of the fixtures. Already LF, and pinned here so a contributor
+# with core.autocrlf=true cannot commit a CRLF baseline and turn every later
+# regeneration into a whole-file diff. The tests normalise on read either way.
+*.java.txt     text eol=lf
+*.baseline.txt text eol=lf
+*.classes.txt  text eol=lf
+toolchain.txt  text eol=lf
+
+# The wrapper script is POSIX sh, so CRLF would break it at the shebang on
+# anything that is not Windows. Already LF; pinned so it stays that way
+# whatever core.autocrlf is set to locally.
+gradlew     text eol=lf
+
+# Its Windows counterpart wants the opposite, and already has it.
+gradlew.bat text eol=crlf
