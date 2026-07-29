@@ -1,0 +1,74 @@
+import java.util.ArrayList;
+import java.util.List;
+
+public class EnumSample {
+    enum Color { RED, GREEN, BLUE }
+
+    sealed interface Node permits Leaf, Branch {}
+    record Leaf() implements Node {}
+    record Branch() implements Node {}
+
+    static int colorGuarded(Color c) {
+        return switch (c) {
+            case null -> 0;
+            case RED -> 1;
+            case Color x when x.ordinal() > 1 -> 9;
+            default -> -1;
+        };
+    }
+
+    static int shape(Object o) {
+        return switch (o) {
+            case Integer i -> 100 + i;
+            case String s -> 200;
+            case Leaf l -> 300;
+            default -> -1;
+        };
+    }
+
+    static int objEnum(Object o) {
+        return switch (o) {
+            case Color c when c == Color.RED -> 1;
+            case String s -> 2;
+            default -> -1;
+        };
+    }
+
+    static int strPattern(String s) {
+        return switch (s) {
+            case "abc" -> 1;
+            case String x when x.isEmpty() -> 2;
+            default -> -1;
+        };
+    }
+
+    /** Every observable result of the switches above, as a stable string. */
+    public static String runAll() {
+        List<String> out = new ArrayList<>();
+        for (Color c : new Color[] { null, Color.RED, Color.GREEN, Color.BLUE }) {
+            out.add("colorGuarded(" + c + ")=" + call(() -> colorGuarded(c)));
+        }
+        for (Object o : new Object[] { null, 1, 7, "x", "", new Leaf(), new Branch(), 3.5, Color.RED }) {
+            out.add("shape(" + o + ")=" + call(() -> shape(o)));
+            out.add("objEnum(" + o + ")=" + call(() -> objEnum(o)));
+        }
+        for (String s : new String[] { null, "abc", "", "z" }) {
+            out.add("strPattern(" + s + ")=" + call(() -> strPattern(s)));
+        }
+        return String.join("\n", out);
+    }
+
+    private interface IntCall { int get(); }
+
+    private static String call(IntCall c) {
+        try {
+            return Integer.toString(c.get());
+        } catch (Throwable t) {
+            return t.getClass().getSimpleName();
+        }
+    }
+
+    public static void main(String[] args) {
+        System.out.println(runAll());
+    }
+}

@@ -1,0 +1,39 @@
+import java.util.ArrayList;
+import java.util.List;
+
+public class ApiSample {
+    // Sequenced collections: Java 21 API
+    public static String sequenced() {
+        List<Integer> l = new ArrayList<>(List.of(1, 2, 3));
+        return l.reversed().toString() + l.getFirst() + l.getLast();
+    }
+
+    // Virtual threads: Java 21 API
+    public static String virtual() throws Exception {
+        Thread t = Thread.ofVirtual().unstarted(() -> {});
+        t.start();
+        t.join();
+        return "vt-ok";
+    }
+
+    // String.repeat: Java 11 API (should be fine on 17)
+    public static String older() {
+        return "ab".repeat(2);
+    }
+
+    public static String runAll() {
+        List<String> out = new ArrayList<>();
+        String[] names = { "sequenced", "virtual", "older" };
+        for (String n : names) {
+            try {
+                out.add(n + "=" + (String) ApiSample.class.getMethod(n).invoke(null));
+            } catch (Throwable t) {
+                Throwable c = t.getCause() != null ? t.getCause() : t;
+                out.add(n + "=" + c.getClass().getSimpleName());
+            }
+        }
+        return String.join("\n", out);
+    }
+
+    public static void main(String[] args) { System.out.println(runAll()); }
+}

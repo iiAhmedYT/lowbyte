@@ -1,0 +1,71 @@
+import java.util.ArrayList;
+import java.util.List;
+
+public class RecordSample {
+    sealed interface Shape permits Circle, Rect, Group {}
+    record Point(int x, int y) {}
+    record Circle(Point center, double r) implements Shape {}
+    record Rect(Point a, Point b) implements Shape {}
+    record Group(List<Shape> items) implements Shape {}
+    record Pair<A, B>(A first, B second) {}
+
+    // record deconstruction pattern
+    static String describe(Object o) {
+        return switch (o) {
+            case Circle(Point(var x, var y), double r) when r > 10 -> "bigCircle@" + x + "," + y;
+            case Circle(Point p, double r) -> "circle@" + p.x() + " r=" + r;
+            case Rect(Point(var x1, var y1), Point(var x2, var y2)) -> "rect" + (x2 - x1) + "x" + (y2 - y1);
+            case Group(List<Shape> items) -> "group:" + items.size();
+            case Pair(String s, Integer i) -> "pair:" + s + i;
+            case Pair(var a, var b) -> "pair?" + a + b;
+            case null -> "null";
+            default -> "other";
+        };
+    }
+
+    // exhaustive switch over a sealed interface, no default
+    static int area(Shape s) {
+        return switch (s) {
+            case Circle c -> 1;
+            case Rect r -> 2;
+            case Group g -> 3;
+        };
+    }
+
+    // instanceof with record pattern
+    static int deconstruct(Object o) {
+        if (o instanceof Circle(Point(var x, var y), var r)) return x + y + (int) r;
+        if (o instanceof Pair(Integer a, Integer b)) return a + b;
+        return -1;
+    }
+
+    public static String runAll() {
+        List<String> out = new ArrayList<>();
+        Object[] inputs = {
+            null,
+            new Circle(new Point(1, 2), 20.0),
+            new Circle(new Point(3, 4), 5.0),
+            new Rect(new Point(0, 0), new Point(7, 9)),
+            new Group(List.of(new Rect(new Point(0, 0), new Point(1, 1)))),
+            new Pair<>("s", 5),
+            new Pair<>(1.5, 2.5),
+            "plain",
+            42
+        };
+        for (Object o : inputs) {
+            out.add("describe(" + o + ")=" + describe(o));
+            out.add("deconstruct(" + o + ")=" + deconstruct(o));
+        }
+        for (Shape s : new Shape[] {
+            new Circle(new Point(0, 0), 1), new Rect(new Point(0, 0), new Point(1, 1)),
+            new Group(List.of())
+        }) {
+            out.add("area(" + s + ")=" + area(s));
+        }
+        return String.join("\n", out);
+    }
+
+    public static void main(String[] args) {
+        System.out.println(runAll());
+    }
+}

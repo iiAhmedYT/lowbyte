@@ -1,0 +1,21 @@
+describe(null)=null
+deconstruct(null)=-1
+describe(Circle[center=Point[x=1, y=2], r=20.0])=bigCircle@1,2
+deconstruct(Circle[center=Point[x=1, y=2], r=20.0])=23
+describe(Circle[center=Point[x=3, y=4], r=5.0])=circle@3 r=5.0
+deconstruct(Circle[center=Point[x=3, y=4], r=5.0])=12
+describe(Rect[a=Point[x=0, y=0], b=Point[x=7, y=9]])=rect7x9
+deconstruct(Rect[a=Point[x=0, y=0], b=Point[x=7, y=9]])=-1
+describe(Group[items=[Rect[a=Point[x=0, y=0], b=Point[x=1, y=1]]]])=group:1
+deconstruct(Group[items=[Rect[a=Point[x=0, y=0], b=Point[x=1, y=1]]]])=-1
+describe(Pair[first=s, second=5])=pair:s5
+deconstruct(Pair[first=s, second=5])=-1
+describe(Pair[first=1.5, second=2.5])=pair?1.52.5
+deconstruct(Pair[first=1.5, second=2.5])=-1
+describe(plain)=other
+deconstruct(plain)=-1
+describe(42)=other
+deconstruct(42)=-1
+area(Circle[center=Point[x=0, y=0], r=1.0])=1
+area(Rect[a=Point[x=0, y=0], b=Point[x=1, y=1]])=2
+area(Group[items=[]])=3
