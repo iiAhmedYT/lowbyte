@@ -18,14 +18,33 @@ import org.objectweb.asm.commons.SimpleRemapper
  */
 object ClassDowngrader {
 
-    /** [onUnsupported] gets a description of anything the target can't express. */
-    fun downgrade(classBytes: ByteArray, targetJava: Int, onUnsupported: (String) -> Unit): ByteArray {
+    /**
+     * [onUnsupported] gets a description of anything the target can't express.
+     *
+     * [context] defaults to empty, which is right for a class considered on its
+     * own. The jar-wide transforms then find nothing to do, rather than doing
+     * the wrong thing.
+     */
+    fun downgrade(
+        classBytes: ByteArray,
+        targetJava: Int,
+        context: DowngradeContext = DowngradeContext.EMPTY,
+        onUnsupported: (String) -> Unit
+    ): ByteArray {
         val targetMajor = ClassFileVersion.fromJavaVersion(targetJava)
 
         val reader = ClassReader(classBytes)
         // COMPUTE_MAXS, never COMPUTE_FRAMES: the latter loads the classes it is
         // processing, and those aren't on our classpath.
-        val writer = ClassWriter(reader, ClassWriter.COMPUTE_MAXS)
+        //
+        // The reader is deliberately not handed to the writer. Doing so copies
+        // the original constant pool wholesale, which keeps entries nothing
+        // refers to any more. That is fatal here rather than merely wasteful: a
+        // lowered pattern switch drops the last reference to javac's
+        // CONSTANT_Dynamic labels, and a leftover one in a class file below
+        // version 55 is a ClassFormatError at load time. Building the pool from
+        // what is actually visited costs a little speed and cannot go stale.
+        val writer = ClassWriter(ClassWriter.COMPUTE_MAXS)
 
         var visitor: ClassVisitor = writer
 
@@ -37,7 +56,7 @@ object ClassDowngrader {
         visitor = VersionClassVisitor(visitor, targetMajor, onUnsupported)
 
         // Goes on last so the transforms still see the original version.
-        visitor = FeatureTransforms.chain(visitor, targetJava, onUnsupported)
+        visitor = FeatureTransforms.chain(visitor, targetJava, context, onUnsupported)
 
         reader.accept(visitor, 0)
 

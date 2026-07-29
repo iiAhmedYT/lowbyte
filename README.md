@@ -83,12 +83,43 @@ Beyond the header rewrite, Lowbyte rewrites language features the target cannot 
 | Record patterns (JEP 440)                                 | 21         | javac desugars these already; the `java.lang.MatchException` it leaves behind is swapped |
 | `sealed` types (`PermittedSubclasses`)                    | 17         | Attribute dropped, which is all sealedness is                                            |
 | Records (`Record`, `ObjectMethods`)                       | 16         | Turned into an ordinary final class with generated `equals`/`hashCode`/`toString`        |
-| Nestmates (`NestHost`/`NestMembers`)                      | 11         | Not yet handled                                                                          |
+| Nestmates (`NestHost`/`NestMembers`)                      | 11         | Attributes dropped and the pre-11 access bridges generated                               |
+| `CONSTANT_Dynamic`                                        | 11         | Qualified enum labels are read and lowered, anything else is reported                    |
 | `invokedynamic` string concat, private interface methods  | 9          | Not yet handled                                                                          |
 
-**Java 21 to 11 is covered.** Lower targets are not. Going below 11 still needs the
-nestmate work, and below 9 the indified string concat and private interface methods.
-`CONSTANT_Dynamic` is not on the list because javac does not emit it.
+**Java 21 to 9 is covered.** Lower targets are not: going below 9 still needs the indified
+string concat and the private interface method call sites.
+
+#### Qualified enum labels and `CONSTANT_Dynamic`
+javac does emit condy. A qualified enum constant in a pattern switch is not a string label
+the way an enum switch's is:
+
+```java
+switch (o) {
+    case Color.RED -> 1;   // label is a CONSTANT_Dynamic java.lang.Enum$EnumDesc
+    ...
+}
+```
+
+The `typeSwitch` label is an `Enum$EnumDesc` built through `ConstantBootstraps.invoke`,
+nested one level deep because the `ClassDesc` handed to `EnumDesc.of` is itself a condy.
+Lowbyte reads the enum's name and the constant's name back out of those two constants and
+emits a `getstatic` of the field plus an identity comparison. Enum constants are
+singletons, so that is the same test the resolved `EnumDesc` would have performed, and it
+resolves at link time rather than on first use.
+
+Two consequences worth knowing. Lowering the label drops the last reference to those
+constants, so the writer must not inherit the original constant pool: an orphaned condy in
+a class file below version 55 is a `ClassFormatError` at load time whether or not anything
+still refers to it. Lowbyte therefore rebuilds the pool from what it actually emits.
+
+Condy reached any other way, an `ldc` of one or some other bootstrap argument, is reported
+rather than lowered. Lowering it in general is not a rewrite but an evaluation: the
+bootstrap would have to run at class-init time into a static field, which is only sound
+when it has no side effects and its arguments are themselves representable.
+`ConstantBootstraps.invoke` of an arbitrary method handle is neither, so Lowbyte stops the
+build instead of guessing. Without that check the class would simply fail to load, since
+below Java 11 condy is not a legal constant pool entry at all.
 
 Every rewritten call site gets a `private static synthetic` method in the same class and
 the `invokedynamic` turns into an `invokestatic`. No runtime class is injected and nothing
@@ -125,11 +156,38 @@ Dropping `PermittedSubclasses` gives up the link-time check, so a class compiled
 against the downgraded jar can extend a type that was sealed. Source still cannot do it
 without recompiling against the original.
 
+#### Nestmates
+Since Java 11 a class may read a private field of another class in its nest directly, and
+javac emits exactly that. The permission comes from `NestHost` and `NestMembers`, so
+dropping them turns every such access into an `IllegalAccessError`.
+
+Each reached member therefore gets a package-private `static lowbyte$access$N` accessor on
+the class that *owns* it, and the call site invokes that instead. Package-private is
+enough, because a nest is a top-level class plus its nested classes and those always share
+a package. This is what javac itself did before nestmates existed.
+
+Constructors work differently. `new Foo(...)` compiles to `new`, `dup`, arguments,
+`invokespecial`, and the `new` can sit arbitrarily far from the `invokespecial`, so
+swapping in a static factory would mean pairing them back up by dataflow. Instead the
+owner gains a package-private constructor overload taking one extra argument of an
+otherwise empty generated type, `Foo$lowbyte$Nest`, and the call site passes null. Those
+marker classes are the only entries in the output jar that did not come from an entry in
+the input. javac 8 did the same thing with an anonymous class.
+
+This is also the one transform that cannot work from a single class file. A call site
+names an owner, a name and a descriptor, but never the access flags, so whether
+`Outer.secret` needs a bridge is a fact about a *different* class. Lowbyte therefore reads
+every class in the jar before writing any of it, and if a bridge is ever owed by a class
+that was excluded or absent, that is reported rather than shipped as a
+`NoSuchMethodError`.
+
 Correctness is pinned by a differential test. `src/test/resources/javac21` holds real
 javac 21 output, and the expected values are what those samples printed running on an
 actual JDK 21, with the bootstraps linked by the JDK itself. The same classes are
-downgraded to both 17 and 11 and have to print the same thing either way, so the generated
+downgraded to 17, 11 and 9 and have to print the same thing every time, so the generated
 code is checked against real bootstrap behaviour rather than against a reading of the spec.
+Each target adds a layer: 17 lowers the switches, 11 also lowers records and sealed types,
+9 additionally unpicks the nests.
 
 #### Regenerating the fixtures
 Only the `*.java.txt` sources in `src/test/resources/javac21` are hand-written. Everything

@@ -1,6 +1,7 @@
 package dev.iiahmed.lowbyte.transform
 
 import dev.iiahmed.lowbyte.classfile.Bytecode
+import dev.iiahmed.lowbyte.downgrade.DowngradeContext
 import org.objectweb.asm.ClassVisitor
 import org.objectweb.asm.Handle
 import org.objectweb.asm.Label
@@ -16,8 +17,11 @@ object RecordsTransform : FeatureTransform {
 
     override val introducedIn = 16
 
-    override fun wrap(next: ClassVisitor, onUnsupported: (String) -> Unit): ClassVisitor =
-        RecordsTransformer(next, onUnsupported)
+    override fun wrap(
+        next: ClassVisitor,
+        context: DowngradeContext,
+        onUnsupported: (String) -> Unit
+    ): ClassVisitor = RecordsTransformer(next, onUnsupported)
 }
 
 /**

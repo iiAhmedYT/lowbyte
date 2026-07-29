@@ -1,0 +1,5 @@
+outerReadsInner=100,5,10,tag0,tag1
+innerReadsOuter=3,4,5,10,20,10
+viaLambda=11
+deeper=13
+sameClass=7

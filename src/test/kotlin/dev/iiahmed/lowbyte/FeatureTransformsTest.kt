@@ -1,7 +1,10 @@
 package dev.iiahmed.lowbyte
 
+import dev.iiahmed.lowbyte.downgrade.DowngradeContext
+import dev.iiahmed.lowbyte.transform.ConstantDynamicTransform
 import dev.iiahmed.lowbyte.transform.FeatureTransform
 import dev.iiahmed.lowbyte.transform.FeatureTransforms
+import dev.iiahmed.lowbyte.transform.NestmatesTransform
 import dev.iiahmed.lowbyte.transform.RecordsTransform
 import dev.iiahmed.lowbyte.transform.SealedTypesTransform
 import dev.iiahmed.lowbyte.transform.SwitchBootstrapsTransform
@@ -22,7 +25,11 @@ class FeatureTransformsTest {
         private val visited: MutableList<String>
     ) : FeatureTransform {
 
-        override fun wrap(next: ClassVisitor, onUnsupported: (String) -> Unit): ClassVisitor =
+        override fun wrap(
+            next: ClassVisitor,
+            context: DowngradeContext,
+            onUnsupported: (String) -> Unit
+        ): ClassVisitor =
             object : ClassVisitor(Opcodes.ASM9, next) {
                 override fun visit(
                     version: Int,
@@ -70,7 +77,10 @@ class FeatureTransformsTest {
     fun newestFeatureIsLoweredFirst() {
         val visited = mutableListOf<String>()
 
-        val chain = FeatureTransforms.chain(ClassWriter(0), targetJava = 8, onUnsupported = {}, transforms = recorders(visited))
+        val chain = FeatureTransforms.chain(
+            ClassWriter(0), targetJava = 8, context = DowngradeContext.EMPTY,
+            onUnsupported = {}, transforms = recorders(visited)
+        )
         chain.visit(52, Opcodes.ACC_PUBLIC, "Sample", null, "java/lang/Object", null)
 
         // Outermost runs first: anything a newer transform emits still passes
@@ -83,7 +93,10 @@ class FeatureTransformsTest {
         val visited = mutableListOf<String>()
 
         val writer = ClassWriter(0)
-        val chain = FeatureTransforms.chain(writer, targetJava = 21, onUnsupported = {}, transforms = recorders(visited))
+        val chain = FeatureTransforms.chain(
+            writer, targetJava = 21, context = DowngradeContext.EMPTY,
+            onUnsupported = {}, transforms = recorders(visited)
+        )
 
         assertSame(chain, writer, "an empty chain should not wrap the writer")
         assertEquals(emptyList(), visited)
@@ -93,10 +106,15 @@ class FeatureTransformsTest {
     fun everyTransformIsRegistered() {
         assertTrue(
             FeatureTransforms.ALL.containsAll(
-                listOf(RecordsTransform, SealedTypesTransform, SwitchBootstrapsTransform)
+                listOf(
+                    ConstantDynamicTransform, NestmatesTransform, RecordsTransform,
+                    SealedTypesTransform, SwitchBootstrapsTransform
+                )
             ),
             "every transform should be in the registry"
         )
+        assertEquals(11, ConstantDynamicTransform.introducedIn)
+        assertEquals(11, NestmatesTransform.introducedIn)
         assertEquals(16, RecordsTransform.introducedIn)
         assertEquals(17, SealedTypesTransform.introducedIn)
         assertEquals(21, SwitchBootstrapsTransform.introducedIn)
@@ -117,7 +135,16 @@ class FeatureTransformsTest {
         )
         assertEquals(
             listOf(RecordsTransform, SealedTypesTransform, SwitchBootstrapsTransform),
-            FeatureTransforms.forTarget(11)
+            FeatureTransforms.forTarget(11),
+            "11 is where nestmates arrived, so they still hold there"
+        )
+        assertEquals(
+            listOf(
+                ConstantDynamicTransform, NestmatesTransform, RecordsTransform,
+                SealedTypesTransform, SwitchBootstrapsTransform
+            ),
+            FeatureTransforms.forTarget(9),
+            "the condy detector sorts innermost, so it sees the finished stream"
         )
     }
 }

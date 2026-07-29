@@ -1,0 +1,79 @@
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * Qualified enum constants as pattern switch labels.
+ *
+ * `case Color.RED` does not compile to a plain string the way an enum switch
+ * does. javac describes the constant symbolically, as a CONSTANT_Dynamic
+ * `Enum$EnumDesc` built from a nested `ClassDesc` constant, and hands that to
+ * `SwitchBootstraps.typeSwitch` as the label.
+ */
+public class EnumDescSample {
+
+    enum Color { RED, GREEN, BLUE }
+    enum Size { SMALL, LARGE }
+
+    /** Two enums, qualified labels, broader type patterns, a string and null. */
+    static String qualified(Object o) {
+        return switch (o) {
+            case Color.RED -> "color-red";
+            case Size.LARGE -> "size-large";
+            case Color c -> "color-" + c;
+            case Size s -> "size-" + s;
+            case String str -> "string-" + str;
+            case null -> "null";
+            default -> "other";
+        };
+    }
+
+    /** A qualified label sitting in front of a guarded one. */
+    static int guarded(Object o) {
+        return switch (o) {
+            case Color.BLUE -> 1;
+            case Color c when c.ordinal() == 0 -> 2;
+            case Color c -> 3;
+            default -> -1;
+        };
+    }
+
+    /** Qualified labels on the enum's own type rather than Object. */
+    static int overEnum(Color c) {
+        return switch (c) {
+            case RED -> 10;
+            case Color x when x == Color.GREEN -> 20;
+            default -> 30;
+        };
+    }
+
+    private interface Call { String get(); }
+
+    /** A switch with no `case null` throws, and that is worth pinning too. */
+    private static String call(Call c) {
+        try {
+            return c.get();
+        } catch (Throwable t) {
+            return t.getClass().getSimpleName();
+        }
+    }
+
+    public static String runAll() {
+        List<String> out = new ArrayList<>();
+        Object[] inputs = {
+            null, Color.RED, Color.GREEN, Color.BLUE,
+            Size.SMALL, Size.LARGE, "s", 42
+        };
+        for (Object o : inputs) {
+            out.add("qualified(" + o + ")=" + call(() -> qualified(o)));
+            out.add("guarded(" + o + ")=" + call(() -> Integer.toString(guarded(o))));
+        }
+        for (Color c : new Color[] { null, Color.RED, Color.GREEN, Color.BLUE }) {
+            out.add("overEnum(" + c + ")=" + call(() -> Integer.toString(overEnum(c))));
+        }
+        return String.join("\n", out);
+    }
+
+    public static void main(String[] args) {
+        System.out.println(runAll());
+    }
+}

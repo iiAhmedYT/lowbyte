@@ -1,7 +1,9 @@
 package dev.iiahmed.lowbyte.transform
 
 import dev.iiahmed.lowbyte.classfile.Bytecode
+import dev.iiahmed.lowbyte.downgrade.DowngradeContext
 import org.objectweb.asm.ClassVisitor
+import org.objectweb.asm.ConstantDynamic
 import org.objectweb.asm.Handle
 import org.objectweb.asm.Label
 import org.objectweb.asm.MethodVisitor
@@ -15,8 +17,11 @@ object SwitchBootstrapsTransform : FeatureTransform {
 
     override val introducedIn = 21
 
-    override fun wrap(next: ClassVisitor, onUnsupported: (String) -> Unit): ClassVisitor =
-        SwitchBootstrapsTransformer(next, onUnsupported)
+    override fun wrap(
+        next: ClassVisitor,
+        context: DowngradeContext,
+        onUnsupported: (String) -> Unit
+    ): ClassVisitor = SwitchBootstrapsTransformer(next, onUnsupported)
 }
 
 /**
@@ -44,6 +49,16 @@ class SwitchBootstrapsTransformer(
         const val CHARACTER = "java/lang/Character"
         const val STRING = "java/lang/String"
         const val ENUM = "java/lang/Enum"
+
+        /** How javac builds the constants behind a qualified enum label. */
+        const val CONSTANT_BOOTSTRAPS = "java/lang/invoke/ConstantBootstraps"
+        const val ENUM_DESC = "java/lang/Enum\$EnumDesc"
+        const val CLASS_DESC = "java/lang/constant/ClassDesc"
+    }
+
+    /** A `case Color.RED` label, once the constant behind it has been read. */
+    private class EnumLabel(val enumInternalName: String, val constantName: String) {
+        val descriptor: String get() = "L$enumInternalName;"
     }
 
     /**
@@ -169,7 +184,69 @@ class SwitchBootstrapsTransformer(
         is String -> true
         // Integer constants never appear under enumSwitch.
         is Int -> kind == SwitchKind.TYPE
+        // Nor does a qualified enum constant, which arrives as a condy EnumDesc.
+        is ConstantDynamic -> kind == SwitchKind.TYPE && enumLabelOf(label) != null
         else -> false
+    }
+
+    /**
+     * Reads a `case Color.RED` label back out of the constant javac emitted.
+     *
+     * javac describes the constant symbolically rather than referring to the
+     * field, as two nested `CONSTANT_Dynamic` entries:
+     *
+     * ```
+     * ConstantBootstraps.invoke(Enum$EnumDesc.of, <ClassDesc condy>, "RED")
+     *   ConstantBootstraps.invoke(ClassDesc.of, "com.example.Color")
+     * ```
+     *
+     * Null for anything that is not exactly that, so an unfamiliar constant is
+     * reported instead of guessed at.
+     */
+    private fun enumLabelOf(label: Any?): EnumLabel? {
+        val condy = label as? ConstantDynamic ?: return null
+        val factory = factoryOf(condy, ENUM_DESC, "of", arguments = 3) ?: return null
+
+        val enumInternalName = classDescOf(condy.getBootstrapMethodArgument(1)) ?: return null
+        val constantName = condy.getBootstrapMethodArgument(2) as? String ?: return null
+
+        // The handle is only read to confirm the shape.
+        check(factory.owner == ENUM_DESC)
+        return EnumLabel(enumInternalName, constantName)
+    }
+
+    /** The internal name a `ClassDesc` constant stands for. */
+    private fun classDescOf(argument: Any?): String? {
+        val condy = argument as? ConstantDynamic ?: return null
+        val factory = factoryOf(condy, CLASS_DESC, null, arguments = 2) ?: return null
+        val name = condy.getBootstrapMethodArgument(1) as? String ?: return null
+
+        return when (factory.name) {
+            // ClassDesc.of takes a binary name, ClassDesc.ofDescriptor a descriptor.
+            "of" -> name.replace('.', '/')
+            "ofDescriptor" -> runCatching { Type.getType(name).internalName }.getOrNull()
+            else -> null
+        }
+    }
+
+    /**
+     * The factory handle of a `ConstantBootstraps.invoke` constant, when it has
+     * the owner, name and argument count we expect.
+     */
+    private fun factoryOf(
+        condy: ConstantDynamic,
+        owner: String,
+        name: String?,
+        arguments: Int
+    ): Handle? {
+        if (condy.bootstrapMethod.owner != CONSTANT_BOOTSTRAPS) return null
+        if (condy.bootstrapMethod.name != "invoke") return null
+        if (condy.bootstrapMethodArgumentCount != arguments) return null
+
+        val factory = condy.getBootstrapMethodArgument(0) as? Handle ?: return null
+        if (factory.owner != owner) return null
+        if (name != null && factory.name != name) return null
+        return factory
     }
 
     /**
@@ -228,6 +305,22 @@ class SwitchBootstrapsTransformer(
                 mv.visitVarInsn(Opcodes.ALOAD, 0)
                 mv.visitTypeInsn(Opcodes.INSTANCEOF, label.internalName)
                 mv.visitJumpInsn(Opcodes.IFEQ, next)
+            }
+
+            // Qualified enum constant, `case Color.RED`. Enum constants are
+            // singletons, so reading the field and comparing by identity is the
+            // same test the resolved EnumDesc would have performed, and it
+            // resolves at link time instead of on first use.
+            label is ConstantDynamic -> {
+                val enumLabel = requireNotNull(enumLabelOf(label))
+                mv.visitVarInsn(Opcodes.ALOAD, 0)
+                mv.visitFieldInsn(
+                    Opcodes.GETSTATIC,
+                    enumLabel.enumInternalName,
+                    enumLabel.constantName,
+                    enumLabel.descriptor
+                )
+                mv.visitJumpInsn(Opcodes.IF_ACMPNE, next)
             }
 
             // Enum constant name. The checkcast keeps this verifiable whatever

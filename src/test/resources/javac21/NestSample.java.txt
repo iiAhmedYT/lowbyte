@@ -1,0 +1,85 @@
+import java.util.ArrayList;
+import java.util.List;
+import java.util.function.IntSupplier;
+
+/**
+ * Every way one class in a nest can reach a private member of another.
+ *
+ * Since Java 11 javac emits these as direct field and method access, permitted
+ * only by the NestHost/NestMembers attributes. Downgrading has to put the
+ * pre-11 accessors back, so each direction and each member kind is exercised
+ * here: outer into nested, nested into outer, two levels down, and from inside
+ * a lambda body.
+ */
+public class NestSample {
+
+    private int field = 1;
+    private static int staticField = 10;
+
+    private int method(int x) { return x + field; }
+    private static int staticMethod(int x) { return x * 2; }
+
+    private NestSample(int f) { this.field = f; }
+    private NestSample() { this(7); }
+
+    private static class Secret {
+        private int hidden = 100;
+        private static String tag = "tag0";
+        private Secret() {}
+        private int reveal() { return hidden * 2; }
+    }
+
+    /** Outer class reaching into a nested class. */
+    private static String outerReadsInner() {
+        Secret s = new Secret();      // private constructor
+        int read = s.hidden;          // private instance field, read
+        s.hidden = 5;                 // private instance field, write
+        int called = s.reveal();      // private instance method
+        String tag = Secret.tag;      // private static field, read
+        Secret.tag = "tag1";          // private static field, write
+        return read + "," + s.hidden + "," + called + "," + tag + "," + Secret.tag;
+    }
+
+    static class Inner {
+
+        /** Nested class reaching back into the outer class. */
+        static String innerReadsOuter() {
+            NestSample o = new NestSample(3);   // private constructor
+            int read = o.field;                 // private instance field, read
+            o.field = 4;                        // private instance field, write
+            int called = o.method(1);           // private instance method
+            int stat = staticField;             // private static field, read
+            staticField = 20;                   // private static field, write
+            int statCalled = staticMethod(5);   // private static method
+            return read + "," + o.field + "," + called + "," + stat + ","
+                + staticField + "," + statCalled;
+        }
+
+        /** The private access sits in the lambda body, not the enclosing method. */
+        static int viaLambda(NestSample o) {
+            IntSupplier supplier = () -> o.method(2);
+            return supplier.getAsInt();
+        }
+
+        static class Deeper {
+            /** Two levels down is still the same nest. */
+            static int reachTop(NestSample o) { return o.field + staticMethod(1); }
+        }
+    }
+
+    public static String runAll() {
+        List<String> out = new ArrayList<>();
+        out.add("outerReadsInner=" + outerReadsInner());
+        out.add("innerReadsOuter=" + Inner.innerReadsOuter());
+        out.add("viaLambda=" + Inner.viaLambda(new NestSample(9)));
+        out.add("deeper=" + Inner.Deeper.reachTop(new NestSample(11)));
+        // Reaching your own privates never needed a bridge, so this must come
+        // through the downgrade untouched.
+        out.add("sameClass=" + new NestSample().method(0));
+        return String.join("\n", out);
+    }
+
+    public static void main(String[] args) {
+        System.out.println(runAll());
+    }
+}

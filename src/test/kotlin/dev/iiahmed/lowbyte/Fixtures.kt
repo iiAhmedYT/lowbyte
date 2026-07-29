@@ -1,6 +1,9 @@
 package dev.iiahmed.lowbyte
 
+import dev.iiahmed.lowbyte.classfile.ClassFileVersion
 import dev.iiahmed.lowbyte.downgrade.ClassDowngrader
+import dev.iiahmed.lowbyte.downgrade.DowngradeContext
+import dev.iiahmed.lowbyte.nest.NestRegistry
 import org.objectweb.asm.ClassReader
 import org.objectweb.asm.ClassVisitor
 import org.objectweb.asm.Handle
@@ -23,11 +26,38 @@ object Fixtures {
     const val SWITCH_BOOTSTRAPS = "java/lang/runtime/SwitchBootstraps"
     const val OBJECT_METHODS = "java/lang/runtime/ObjectMethods"
 
-    /** Class files of [sample], downgraded to [targetJava], keyed by class name. */
-    fun downgrade(sample: String, targetJava: Int): Map<String, ByteArray> =
-        classNames(sample).associateWith { name ->
-            ClassDowngrader.downgrade(readClass(name), targetJava) { fail("$name: unsupported: $it") }
+    /**
+     * Class files of [sample], downgraded to [targetJava], keyed by class name.
+     *
+     * The nest scan and the marker classes are done the same way
+     * [dev.iiahmed.lowbyte.tasks.DowngradeBytecode] does them, so a sample that
+     * reaches across its own nest is downgraded as it would be in a real jar.
+     */
+    fun downgrade(sample: String, targetJava: Int): Map<String, ByteArray> {
+        val originals = classNames(sample).associateWith { readClass(it) }
+
+        val nests = if (targetJava < NestRegistry.INTRODUCED_IN) {
+            NestRegistry.scan(originals.values.asSequence())
+        } else {
+            NestRegistry.EMPTY
         }
+        val context = DowngradeContext(nests)
+
+        val downgraded = originals.mapValues { (name, classBytes) ->
+            ClassDowngrader.downgrade(classBytes, targetJava, context) { fail("$name: unsupported: $it") }
+        }.toMutableMap()
+
+        nests.markerClasses.forEach { internalName ->
+            downgraded[internalName] =
+                NestRegistry.markerClassBytes(internalName, ClassFileVersion.fromJavaVersion(targetJava))
+        }
+
+        return downgraded
+    }
+
+    /** The nest registry a sample's own classes produce. */
+    fun nestsOf(sample: String): NestRegistry =
+        NestRegistry.scan(classNames(sample).asSequence().map { readClass(it) })
 
     /** The class names produced by compiling [sample]. */
     fun classNames(sample: String): List<String> =
@@ -56,17 +86,45 @@ object Fixtures {
     /** Counts every `invokedynamic` in a class, whatever its bootstrap. */
     fun invokeDynamicCount(classBytes: ByteArray): Int = countInvokeDynamic(classBytes) { true }
 
-    /** Everything about a class that says "record" or "sealed". */
+    /**
+     * Counts `CONSTANT_Dynamic` entries by walking the raw constant pool.
+     *
+     * A visitor would only see the ones something still refers to, and the
+     * entries that matter here are exactly the orphans: below class file version
+     * 55 a leftover condy is a `ClassFormatError` whether or not any instruction
+     * mentions it.
+     */
+    fun constantDynamicCount(classBytes: ByteArray): Int {
+        val reader = ClassReader(classBytes)
+        var count = 0
+        for (item in 1 until reader.itemCount) {
+            // Zero marks the unused second slot of a long or double entry.
+            val offset = reader.getItem(item)
+            if (offset > 0 && reader.readByte(offset - 1) == CONSTANT_DYNAMIC_TAG) count++
+        }
+        return count
+    }
+
+    /** JVMS table 4.4-B. */
+    private const val CONSTANT_DYNAMIC_TAG = 17
+
+    /** Everything about a class that says "record", "sealed" or "nest". */
     class Shape(
         val superName: String?,
         val isRecord: Boolean,
         val recordComponents: List<String>,
-        val permittedSubclasses: List<String>
+        val permittedSubclasses: List<String>,
+        val nestHost: String?,
+        val nestMembers: List<String>,
+        val methods: List<String>
     )
 
     fun shapeOf(classBytes: ByteArray): Shape {
         var superName: String? = null
         var isRecord = false
+        var nestHost: String? = null
+        val nestMembers = mutableListOf<String>()
+        val methods = mutableListOf<String>()
         val components = mutableListOf<String>()
         val permitted = mutableListOf<String>()
 
@@ -96,9 +154,28 @@ object Fixtures {
             override fun visitPermittedSubclass(permittedSubclass: String?) {
                 permitted += permittedSubclass.orEmpty()
             }
+
+            override fun visitNestHost(host: String?) {
+                nestHost = host
+            }
+
+            override fun visitNestMember(member: String?) {
+                nestMembers += member.orEmpty()
+            }
+
+            override fun visitMethod(
+                access: Int,
+                name: String?,
+                descriptor: String?,
+                signature: String?,
+                exceptions: Array<out String>?
+            ): MethodVisitor? {
+                methods += "${name.orEmpty()}${descriptor.orEmpty()}"
+                return null
+            }
         }, 0)
 
-        return Shape(superName, isRecord, components, permitted)
+        return Shape(superName, isRecord, components, permitted, nestHost, nestMembers, methods)
     }
 
     private fun countInvokeDynamic(classBytes: ByteArray, predicate: (Handle?) -> Boolean): Int {

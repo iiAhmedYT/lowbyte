@@ -1,5 +1,6 @@
 package dev.iiahmed.lowbyte.transform
 
+import dev.iiahmed.lowbyte.downgrade.DowngradeContext
 import org.objectweb.asm.ClassVisitor
 import org.objectweb.asm.Opcodes
 
@@ -10,8 +11,11 @@ object SealedTypesTransform : FeatureTransform {
 
     override val introducedIn = 17
 
-    override fun wrap(next: ClassVisitor, onUnsupported: (String) -> Unit): ClassVisitor =
-        SealedTypesTransformer(next)
+    override fun wrap(
+        next: ClassVisitor,
+        context: DowngradeContext,
+        onUnsupported: (String) -> Unit
+    ): ClassVisitor = SealedTypesTransformer(next)
 }
 
 /**

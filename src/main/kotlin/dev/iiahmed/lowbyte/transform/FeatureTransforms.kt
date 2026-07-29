@@ -1,11 +1,16 @@
 package dev.iiahmed.lowbyte.transform
 
+import dev.iiahmed.lowbyte.downgrade.DowngradeContext
 import org.objectweb.asm.ClassVisitor
 
 /** Every transform Lowbyte knows about. Adding one is a single entry in [ALL]. */
 object FeatureTransforms {
 
     val ALL: List<FeatureTransform> = listOf(
+        // First among the transforms sharing a release, which puts it innermost,
+        // so it inspects what is about to be written rather than what arrived.
+        ConstantDynamicTransform,
+        NestmatesTransform,
         RecordsTransform,
         SealedTypesTransform,
         SwitchBootstrapsTransform
@@ -26,8 +31,9 @@ object FeatureTransforms {
     fun chain(
         base: ClassVisitor,
         targetJava: Int,
+        context: DowngradeContext,
         onUnsupported: (String) -> Unit,
         transforms: List<FeatureTransform> = ALL
     ): ClassVisitor = forTarget(targetJava, transforms)
-        .fold(base) { next, transform -> transform.wrap(next, onUnsupported) }
+        .fold(base) { next, transform -> transform.wrap(next, context, onUnsupported) }
 }
