@@ -36,7 +36,7 @@ import kotlin.test.assertTrue
 class Javac21DowngradeTest {
 
     private companion object {
-        val SAMPLES = listOf("EnumSample", "RecordSample", "RecordOpsSample", "NestSample", "EnumDescSample")
+        val SAMPLES = Fixtures.SAMPLES
 
         /** Which samples actually contain a pattern switch. */
         val SWITCH_SAMPLES = listOf("EnumSample", "RecordSample", "EnumDescSample")
@@ -45,10 +45,11 @@ class Javac21DowngradeTest {
         val RECORD_SAMPLES = listOf("EnumSample", "RecordSample", "RecordOpsSample")
 
         /**
-         * 17 lowers switches only, 11 also lowers records and sealed types, and
-         * 9 additionally unpicks the nests.
+         * 17 lowers switches only, 11 also lowers records and sealed types, 9
+         * additionally unpicks the nests, and 8 also rebuilds string concat and
+         * fixes the private interface call sites.
          */
-        val TARGETS = listOf(17, 11, 9)
+        val TARGETS = listOf(17, 11, 9, 8)
     }
 
     @Test
@@ -202,6 +203,51 @@ class Javac21DowngradeTest {
                 )
             }
         }
+    }
+
+    @Test
+    fun stringConcatIsRebuiltOnlyBelowNine() {
+        val before = Fixtures.constantDynamicCount(Fixtures.readClass("ConcatSample"))
+        assertEquals(0, before, "ConcatSample should carry no condy")
+        assertTrue(
+            Fixtures.stringConcatCallSites(Fixtures.readClass("ConcatSample")) > 0,
+            "ConcatSample no longer covers any StringConcatFactory call site"
+        )
+
+        // StringConcatFactory arrived in 9, so it is fine to leave alone there.
+        listOf(17, 11, 9).forEach { target ->
+            assertTrue(
+                Fixtures.stringConcatCallSites(
+                    Fixtures.downgrade("ConcatSample", target).getValue("ConcatSample")
+                ) > 0,
+                "ConcatSample at Java $target should have kept its call sites"
+            )
+        }
+
+        Fixtures.downgrade("ConcatSample", 8).forEach { (name, bytes) ->
+            assertEquals(0, Fixtures.stringConcatCallSites(bytes), "$name: a call site survived a Java 8 target")
+        }
+    }
+
+    @Test
+    fun privateInterfaceCallsBecomeInvokespecialOnlyBelowNine() {
+        val face = "InterfaceSample" + '$'.toString() + "Face"
+
+        fun targetsAt(target: Int) =
+            Fixtures.invokeInterfaceTargets(Fixtures.downgrade("InterfaceSample", target).getValue(face), face)
+
+        // javac calls its own private interface methods with invokeinterface,
+        // which a Java 8 JVM refuses for a private method.
+        listOf(17, 11, 9).forEach { target ->
+            assertTrue("helper(I)I" in targetsAt(target), "Java $target should have kept its invokeinterface")
+        }
+
+        val atEight = targetsAt(8)
+        assertFalse("helper(I)I" in atEight, "an invokeinterface to a private method survived: $atEight")
+        assertFalse("chain(I)I" in atEight, "an invokeinterface to a private method survived: $atEight")
+        // base() is public abstract, so it is still a genuine interface call and
+        // turning it into invokespecial would change the dispatch.
+        assertTrue("base()I" in atEight, "a public interface call was rewritten: $atEight")
     }
 
     @Test

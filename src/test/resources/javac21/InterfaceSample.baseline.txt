@@ -1,0 +1,6 @@
+use(2)=18
+use(0)=10
+zero.use(5)=20
+chained(1)=23
+viaLambda(3)=14
+describe=empty

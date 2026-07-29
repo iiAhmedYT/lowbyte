@@ -7,8 +7,11 @@ import org.objectweb.asm.ClassVisitor
 object FeatureTransforms {
 
     val ALL: List<FeatureTransform> = listOf(
-        // First among the transforms sharing a release, which puts it innermost,
-        // so it inspects what is about to be written rather than what arrived.
+        PrivateInterfaceMethodsTransform,
+        StringConcatTransform,
+        // Ahead of the other release-11 entry, so it inspects what those have
+        // finished with. The two above it are further in still, and neither can
+        // produce a constant, so nothing escapes behind its back.
         ConstantDynamicTransform,
         NestmatesTransform,
         RecordsTransform,

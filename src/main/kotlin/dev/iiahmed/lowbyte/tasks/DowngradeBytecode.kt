@@ -10,9 +10,12 @@ import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.ListProperty
 import org.gradle.api.provider.Property
 import org.gradle.api.tasks.*
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.jar.JarEntry
 import java.util.jar.JarFile
+import java.util.jar.Manifest
 import java.util.jar.JarOutputStream
 import java.util.zip.ZipEntry
 import javax.inject.Inject
@@ -70,13 +73,35 @@ abstract class DowngradeBytecode @Inject constructor() : DefaultTask() {
             val context = DowngradeContext(scanNests(jar, target))
             val written = mutableSetOf<String>()
 
+            var droppedSignatures = 0
+            var droppedModuleInfo = 0
+
             JarOutputStream(output.outputStream()).use { jos ->
                 val entries = jar.entries()
                 while (entries.hasMoreElements()) {
                     val entry = entries.nextElement()
+
+                    // Dropped rather than copied: every digest in them covers a
+                    // class we are about to rewrite.
+                    if (isSignatureFile(entry.name)) {
+                        droppedSignatures++
+                        continue
+                    }
+
+                    if (isDroppedModuleInfo(entry.name, target)) {
+                        droppedModuleInfo++
+                        continue
+                    }
+
                     jos.putNextEntry(ZipEntry(entry.name))
 
-                    if (entry.name.endsWith(".class") && !isExcluded(entry.name)) {
+                    if (isManifest(entry.name)) {
+                        jos.write(withoutEntryDigests(jar.getInputStream(entry).readAllBytes()))
+                        untouched++
+                    } else if (entry.name.endsWith(".class") &&
+                        !isExcluded(entry.name) &&
+                        !isUnloweredModuleInfo(entry.name, target)
+                    ) {
                         val internalName = entry.name.removeSuffix(".class")
                         val classBytes = jar.getInputStream(entry).readAllBytes()
                         jos.write(ClassDowngrader.downgrade(classBytes, target, context) { feature ->
@@ -94,6 +119,23 @@ abstract class DowngradeBytecode @Inject constructor() : DefaultTask() {
                 }
 
                 untouched += writeMarkerClasses(jos, context, target)
+            }
+
+            if (droppedSignatures > 0) {
+                logger.warn(
+                    "Lowbyte: dropped $droppedSignatures signature file(s). Rewriting a class " +
+                        "invalidates every digest covering it, so the output is unsigned. " +
+                        "Re-sign it if that matters."
+                )
+            }
+
+            if (droppedModuleInfo > 0) {
+                logger.warn(
+                    "Lowbyte: dropped module-info.class. Java $target has no module system, and " +
+                        "there is no class file version at which a module descriptor is both valid " +
+                        "and loadable there, so anything scanning the jar would have hit an " +
+                        "UnsupportedClassVersionError. The output is no longer a module."
+                )
             }
 
             // A bridge that was never emitted is a NoSuchMethodError waiting to
@@ -128,7 +170,11 @@ abstract class DowngradeBytecode @Inject constructor() : DefaultTask() {
         val entries = jar.entries()
         while (entries.hasMoreElements()) {
             val entry = entries.nextElement()
-            if (entry.name.endsWith(".class") && !isExcluded(entry.name)) result += entry
+            // A descriptor declares no members and references none, so it can
+            // never own or reach a bridged member.
+            if (entry.name.endsWith(".class") && !isExcluded(entry.name) && !isModuleInfo(entry.name)) {
+                result += entry
+            }
         }
         return result
     }
@@ -174,9 +220,123 @@ abstract class DowngradeBytecode @Inject constructor() : DefaultTask() {
         throw GradleException(summary)
     }
 
+    /**
+     * Whether an entry falls under one of the configured exclusions.
+     *
+     * Matched on name boundaries rather than as a bare prefix, so excluding
+     * `com/foo` covers the package and not `com/foobar` next to it. A `$` counts
+     * as a boundary too, which is what makes excluding a class exclude the
+     * nested classes that go with it.
+     */
     private fun isExcluded(entryName: String): Boolean {
         val internalName = entryName.removeSuffix(".class")
-        return excludedClasses.get().any { internalName.startsWith(it.replace('.', '/')) }
+        return excludedClasses.get().any { excluded ->
+            val prefix = excluded.replace('.', '/').removeSuffix("/")
+            internalName == prefix ||
+                internalName.startsWith("$prefix/") ||
+                internalName.startsWith("$prefix\$")
+        }
+    }
+
+    /**
+     * Matched by suffix so the copies under `META-INF/versions/` in a
+     * multi-release jar are covered too.
+     */
+    private fun isModuleInfo(entryName: String): Boolean = entryName.endsWith("module-info.class")
+
+    /**
+     * The descriptor at the root of the jar, as opposed to a versioned copy.
+     *
+     * Only this one is a class name the runtime will ever resolve.
+     */
+    private fun isRootModuleInfo(entryName: String): Boolean = entryName == "module-info.class"
+
+    /**
+     * A root descriptor aimed at a release with no module system.
+     *
+     * There is no version that helps. Left at 21 anything scanning the jar gets
+     * an `UnsupportedClassVersionError`, and lowered to 8 it gets a
+     * `ClassFormatError`, since `CONSTANT_Module` does not exist before class
+     * file 53. Walking every `.class` entry and defining it is ordinary
+     * behaviour for component scanners and shading tools, so the entry is a
+     * hazard however it is written, and dropping it is the only outcome with no
+     * failure mode on the target.
+     *
+     * A jar downgraded this far cannot be a module there in any case.
+     */
+    private fun isDroppedModuleInfo(entryName: String, target: Int): Boolean =
+        isRootModuleInfo(entryName) && target < ClassFileVersion.MIN_MODULE_JAVA
+
+    /**
+     * A versioned descriptor that has to keep the version it arrived at.
+     *
+     * Down to Java 9 a descriptor is lowered like anything else, and it has to
+     * be: the runtime version-checks `module-info.class` the same way it checks
+     * a class, so one left at 21 in a jar targeting 11 makes that jar unusable
+     * on the module path of the very JVM it was downgraded for.
+     *
+     * Below 9 a copy under `META-INF/versions/` is left alone rather than
+     * dropped. It still describes the module for the newer JVMs that read that
+     * directory, and older ones never resolve a class name from it.
+     */
+    private fun isUnloweredModuleInfo(entryName: String, target: Int): Boolean =
+        isModuleInfo(entryName) && target < ClassFileVersion.MIN_MODULE_JAVA
+
+    private fun isManifest(entryName: String): Boolean = entryName == JarFile.MANIFEST_NAME
+
+    /**
+     * The signature block of a signed jar.
+     *
+     * A signature covers digests of the entries, so rewriting any class breaks
+     * it. Keeping the block would leave a jar that fails verification rather
+     * than one that is merely unsigned, which is the worse of the two.
+     *
+     * Only the top level of `META-INF` counts, since that is the only place the
+     * jar specification looks for these.
+     */
+    private fun isSignatureFile(entryName: String): Boolean {
+        if (!entryName.startsWith("META-INF/")) return false
+
+        val name = entryName.removePrefix("META-INF/")
+        if (name.contains('/')) return false
+
+        val upper = name.uppercase()
+        return upper.endsWith(".SF") ||
+            upper.endsWith(".RSA") ||
+            upper.endsWith(".DSA") ||
+            upper.endsWith(".EC") ||
+            upper.startsWith("SIG-")
+    }
+
+    /**
+     * Strips the per-entry digests a signing run left in the manifest.
+     *
+     * Without the signature block these no longer verify anything, but leaving
+     * them would describe classes whose bytes have changed, and would confuse a
+     * later signing run. Other attributes in those sections are kept, and a
+     * section emptied by the removal goes with them.
+     *
+     * An unsigned manifest comes back byte for byte as it arrived.
+     */
+    private fun withoutEntryDigests(manifestBytes: ByteArray): ByteArray {
+        val manifest = Manifest(ByteArrayInputStream(manifestBytes))
+
+        var changed = false
+        val sections = manifest.entries.entries.iterator()
+        while (sections.hasNext()) {
+            val attributes = sections.next().value
+            if (attributes.keys.removeIf { it.toString().contains("-Digest") }) changed = true
+            if (attributes.isEmpty()) {
+                sections.remove()
+                changed = true
+            }
+        }
+
+        if (!changed) return manifestBytes
+
+        val out = ByteArrayOutputStream()
+        manifest.write(out)
+        return out.toByteArray()
     }
 
 }

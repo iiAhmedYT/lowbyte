@@ -1,0 +1,14 @@
+primitives=z=true b=1 s=2 c=x i=3 j=4 f=5.5 d=6.5
+primitivesNeg=122.61.102.97.108.115.101.32.98.61.45.49.32.115.61.45.50.32.99.61.10.32.105.61.45.51.32.106.61.45.52.32.102.61.45.48.46.48.32.100.61.78.97.78
+references=s=s o=Custom(c) a=[I@x c=[C@x
+referencesNull=s=null o=null a=null c=null
+nullToString=s=s o=null a=null c=null
+markers=1.83.2.83.1.2.101.110.100
+markersLength=9
+leadingAndTrailing=42
+onlyArguments=ab
+onlyArgumentsNull=nullnull
+nested=[<7>]
+inALoop=0,1,2,
+many=1-2-3-4-5-6-7-8
+widening=6566C

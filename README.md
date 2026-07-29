@@ -73,6 +73,34 @@ Classes already at or below the target are copied through untouched.
 Preview-feature classes (minor version `0xFFFF`) cannot be downgraded, since they only
 load on the exact JDK that compiled them. They trip `failOnUnsupported`.
 
+`module-info.class` is lowered like anything else, down to Java 9. It has to be: the
+runtime version-checks a module descriptor the same way it checks a class, so one left at
+21 in a jar targeting 11 makes that jar unusable on the module path of the very JVM it was
+downgraded for.
+
+Targeting Java 8 the root descriptor is **dropped**, with a warning, and the jar stops
+being a module. No version helps: left high, anything scanning the jar gets an
+`UnsupportedClassVersionError`, and lowered to 8 it gets a `ClassFormatError`, because
+`CONSTANT_Module` does not exist before class file 53. To a JVM a module descriptor is
+still a class file, and walking every `.class` entry and defining it is ordinary behaviour
+for component scanners and shading tools, so the entry is a hazard however it is written.
+
+A copy under `META-INF/versions/` is kept instead of dropped, since Java 8 never resolves
+a class name out of that directory and the copy still describes the module for the newer
+JVMs that read it.
+
+### Signed jars
+A signature covers digests of the entries, so rewriting a class breaks it. Lowbyte drops
+the signature block (`META-INF/*.SF`, `*.RSA`, `*.DSA`, `*.EC`, `SIG-*`) and strips the
+per-entry digests from `META-INF/MANIFEST.MF`, leaving every other manifest attribute
+alone, then warns that it did so. The output is an unsigned jar rather than one that fails
+verification, which is the better of the two. Re-sign it afterwards if you need it signed.
+
+### Exclusions
+`excludedClasses` matches on name boundaries, not as a bare prefix. Excluding `com.foo`
+covers that package and not `com.foobar` beside it, and excluding a class covers the nested
+classes that belong to it. Dots and slashes are both accepted.
+
 ### Feature transforms
 Beyond the header rewrite, Lowbyte rewrites language features the target cannot express.
 
@@ -85,10 +113,10 @@ Beyond the header rewrite, Lowbyte rewrites language features the target cannot 
 | Records (`Record`, `ObjectMethods`)                       | 16         | Turned into an ordinary final class with generated `equals`/`hashCode`/`toString`        |
 | Nestmates (`NestHost`/`NestMembers`)                      | 11         | Attributes dropped and the pre-11 access bridges generated                               |
 | `CONSTANT_Dynamic`                                        | 11         | Qualified enum labels are read and lowered, anything else is reported                    |
-| `invokedynamic` string concat, private interface methods  | 9          | Not yet handled                                                                          |
+| `invokedynamic` string concat (`StringConcatFactory`)     | 9          | Rebuilt as a `StringBuilder` chain in a generated static method                          |
+| Private interface method call sites                       | 9          | `invokeinterface` corrected to `invokespecial`                                           |
 
-**Java 21 to 9 is covered.** Lower targets are not: going below 9 still needs the indified
-string concat and the private interface method call sites.
+**Java 21 to 8 is covered.**
 
 #### Qualified enum labels and `CONSTANT_Dynamic`
 javac does emit condy. A qualified enum constant in a pattern switch is not a string label
@@ -156,6 +184,37 @@ Dropping `PermittedSubclasses` gives up the link-time check, so a class compiled
 against the downgraded jar can extend a type that was sealed. Source still cannot do it
 without recompiling against the original.
 
+#### String concatenation
+Since Java 9 javac compiles `a + b` to an `invokedynamic` against
+`java.lang.invoke.StringConcatFactory`, which does not exist on 8, so the call site dies
+with a `BootstrapMethodError` the first time it runs. Lowbyte rebuilds the `StringBuilder`
+chain javac used to emit, in a `lowbyte$concat$N` method.
+
+It goes in a generated method rather than inline for a mechanical reason: by the time the
+`invokedynamic` is reached the operands are already on the stack, and a `StringBuilder`
+chain needs its `new`/`dup` *before* them. A static call consumes exactly the operands
+sitting there, so nothing has to be reordered.
+
+The bootstrap's recipe marks an argument with U+0001 and a constant with U+0002, and
+everything else is literal text. Constants exist only so that one of those two characters
+appearing in your source cannot be mistaken for a marker; both are known at rewrite time,
+so they are folded together into one run of text.
+
+#### Private interface methods
+`ACC_PRIVATE` on an interface method has been legal since class file 52, so the
+declaration needs nothing and a Java 8 JVM loads it happily. The *call* is the problem:
+javac emits `invokeinterface`, and Java 8 answers
+
+```
+IncompatibleClassChangeError: private interface method requires invokespecial,
+not invokeinterface
+```
+
+A private method is not virtual, so only the opcode moves and dispatch is unchanged. The
+same correction is needed on the method handle behind a lambda declared in an interface,
+whose body is itself a private interface method; missing that leaves a
+`BootstrapMethodError` at link time rather than a failure at load time.
+
 #### Nestmates
 Since Java 11 a class may read a private field of another class in its nest directly, and
 javac emits exactly that. The permission comes from `NestHost` and `NestMembers`, so
@@ -202,6 +261,20 @@ That compiles and runs each sample on a JDK 21 toolchain and rewrites `<Name>.cl
 `<Name>.baseline.txt` (its output on real Java 21). Add a case to a sample, or a whole new
 `.java.txt`, then run it. The tests pick the new fixtures up with no code change.
 
+#### Verifying on a real Java 8
+The unit tests run on the Java 17 toolchain, which links `StringConcatFactory` and accepts
+`invokeinterface` on a private method without complaint. A downgrade that would die on
+Java 8 therefore passes them in silence.
+
+```sh
+./gradlew verifyOnJava8
+```
+
+runs every sample downgraded to 8 on an actual JDK 8 launcher and compares it to the same
+Java 21 baseline. It needs a JDK 8 toolchain, so it is contributors-only, and it is worth
+running for anything touching a target below 9. It is how the missing rewrite of the
+method handle behind a lambda in an interface was found: every in-process test passed.
+
 `toolchain.txt` records which JDK produced the current generation. That matters, because
 javac's desugaring is not identical across builds of the same release, so regenerating on
 another machine can legitimately change the class files. It is also why the tests assert
@@ -229,6 +302,7 @@ reached, which happens if a sealed hierarchy is recompiled without its switches.
 |-----------------------------|-------------------------------------------------------------------------|
 | `downgradeBytecode`         | Rewrites every class in the input jar to the target class file version. |
 | `regenerateJavac21Fixtures` | Rebuilds the checked-in Java 21 test fixtures. Contributors only.       |
+| `verifyOnJava8`             | Runs the downgraded fixtures on a real JDK 8. Contributors only.        |
 
 ## License
 This plugin is licensed under the [MIT License](LICENSE)

@@ -42,10 +42,21 @@ class Bridge(
  * Hence the scan: read every class first, then rewrite.
  */
 class NestRegistry private constructor(
-    private val bridges: Map<Pair<BridgeKind, MemberRef>, Bridge>
+    private val bridges: Map<Pair<BridgeKind, MemberRef>, Bridge>,
+    private val privateMethods: Set<MemberRef>
 ) {
 
     val isEmpty: Boolean get() = bridges.isEmpty()
+
+    /**
+     * Whether a method is declared private by the class that owns it.
+     *
+     * A visitor cannot answer this for the class it is walking, because a call
+     * site may be reached before the method it names is visited. The scan has
+     * seen the whole class already, so it can.
+     */
+    fun isPrivateMethod(owner: String, name: String, descriptor: String): Boolean =
+        MemberRef(owner, name, descriptor) in privateMethods
 
     /** Every class that has to gain a bridge, so the caller can check they all exist. */
     val bridgedOwners: Set<String> get() = bridges.values.map { it.member.owner }.toSet()
@@ -65,7 +76,7 @@ class NestRegistry private constructor(
         /** Nestmates arrived in 11, so below that the attributes have to go. */
         const val INTRODUCED_IN = 11
 
-        val EMPTY = NestRegistry(emptyMap())
+        val EMPTY = NestRegistry(emptyMap(), emptySet())
 
         /** Prefix of every generated accessor, matching the other transforms. */
         private const val BRIDGE_PREFIX = "lowbyte\$access\$"
@@ -95,7 +106,10 @@ class NestRegistry private constructor(
                 declarations[scanner.className] = scanner.toDeclaration()
             }
 
-            return NestRegistry(resolve(declarations, references))
+            return NestRegistry(
+                resolve(declarations, references),
+                declarations.values.flatMapTo(mutableSetOf()) { it.privateMethodRefs }
+            )
         }
 
         /**
@@ -220,6 +234,8 @@ class NestRegistry private constructor(
         private val privateFields: Map<MemberRef, Boolean>,
         private val privateMethods: Map<MemberRef, Boolean>
     ) {
+
+        val privateMethodRefs: Set<MemberRef> get() = privateMethods.keys
 
         /** The private member this reference names, or null if there isn't one. */
         fun privateMember(kind: BridgeKind, reference: MemberRef): FoundMember? {

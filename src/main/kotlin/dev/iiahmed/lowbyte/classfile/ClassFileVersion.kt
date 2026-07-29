@@ -5,6 +5,16 @@ object ClassFileVersion {
 
     const val MIN_TARGET_JAVA = 8
 
+    /**
+     * The oldest release with a module system.
+     *
+     * A `module-info` is a class file whose version is checked like any other,
+     * so a descriptor can be lowered to 9 but no further: below that the
+     * `Module` attribute and `ACC_MODULE` have no meaning and the runtime
+     * rejects it outright.
+     */
+    const val MIN_MODULE_JAVA = 9
+
     /** Bounded by what our ASM version can parse, not by the format itself. */
     const val MAX_SUPPORTED_JAVA = 25
 

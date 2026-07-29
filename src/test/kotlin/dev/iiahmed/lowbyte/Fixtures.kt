@@ -23,8 +23,21 @@ import kotlin.test.fail
 object Fixtures {
 
     private const val ROOT = "/javac21"
+
+    /**
+     * Every sample the differential test runs.
+     *
+     * ApiSample is deliberately absent: it calls Java 9 APIs on purpose, so it
+     * is the one sample that cannot run on an older JVM. See JdkApiLimitationTest.
+     */
+    val SAMPLES = listOf(
+        "EnumSample", "RecordSample", "RecordOpsSample", "NestSample",
+        "EnumDescSample", "ConcatSample", "InterfaceSample"
+    )
+
     const val SWITCH_BOOTSTRAPS = "java/lang/runtime/SwitchBootstraps"
     const val OBJECT_METHODS = "java/lang/runtime/ObjectMethods"
+    const val STRING_CONCAT_FACTORY = "java/lang/invoke/StringConcatFactory"
 
     /**
      * Class files of [sample], downgraded to [targetJava], keyed by class name.
@@ -83,8 +96,39 @@ object Fixtures {
     fun objectMethodsCallSites(classBytes: ByteArray): Int =
         countInvokeDynamic(classBytes) { it?.owner == OBJECT_METHODS }
 
+    /** Counts the `StringConcatFactory` call sites left in a class. */
+    fun stringConcatCallSites(classBytes: ByteArray): Int =
+        countInvokeDynamic(classBytes) { it?.owner == STRING_CONCAT_FACTORY }
+
     /** Counts every `invokedynamic` in a class, whatever its bootstrap. */
     fun invokeDynamicCount(classBytes: ByteArray): Int = countInvokeDynamic(classBytes) { true }
+
+    /** The methods of [owner] reached by `invokeinterface`, as `name+descriptor`. */
+    fun invokeInterfaceTargets(classBytes: ByteArray, owner: String): Set<String> {
+        val targets = mutableSetOf<String>()
+        ClassReader(classBytes).accept(object : ClassVisitor(Opcodes.ASM9) {
+            override fun visitMethod(
+                access: Int,
+                name: String?,
+                descriptor: String?,
+                signature: String?,
+                exceptions: Array<out String>?
+            ) = object : MethodVisitor(Opcodes.ASM9) {
+                override fun visitMethodInsn(
+                    opcode: Int,
+                    insnOwner: String?,
+                    insnName: String?,
+                    insnDescriptor: String?,
+                    isInterface: Boolean
+                ) {
+                    if (opcode == Opcodes.INVOKEINTERFACE && insnOwner == owner) {
+                        targets += "${insnName.orEmpty()}${insnDescriptor.orEmpty()}"
+                    }
+                }
+            }
+        }, 0)
+        return targets
+    }
 
     /**
      * Counts `CONSTANT_Dynamic` entries by walking the raw constant pool.

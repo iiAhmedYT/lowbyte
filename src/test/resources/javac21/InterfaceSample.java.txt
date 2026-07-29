@@ -1,0 +1,60 @@
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * Private interface methods, which arrived in Java 9.
+ *
+ * The declaration is not the problem: ACC_PRIVATE on an interface method has
+ * been legal since class file 52. The call is. javac emits invokeinterface for
+ * one, and a Java 8 JVM rejects that with an IncompatibleClassChangeError
+ * saying it wanted invokespecial.
+ *
+ * A lambda inside an interface produces a private static method too, which
+ * javac 8 also emitted, so that path has to keep working unchanged.
+ */
+public class InterfaceSample {
+
+    interface Face {
+        int base();
+
+        private int helper(int x) { return x + base(); }
+
+        private static int staticHelper(int x) { return x * 3; }
+
+        default int use(int x) { return helper(x) + staticHelper(x); }
+
+        /** Two private helpers calling each other. */
+        private int chain(int x) { return helper(x) + helper(x + 1); }
+
+        default int chained(int x) { return chain(x); }
+
+        /** The lambda body becomes a private static method of the interface. */
+        default int viaLambda(int x) {
+            java.util.function.IntUnaryOperator op = v -> helper(v) + 1;
+            return op.applyAsInt(x);
+        }
+    }
+
+    interface Empty {
+        private static String tag() { return "empty"; }
+        static String describe() { return tag(); }
+    }
+
+    public static String runAll() {
+        List<String> out = new ArrayList<>();
+        Face ten = () -> 10;
+        Face zero = () -> 0;
+
+        out.add("use(2)=" + ten.use(2));
+        out.add("use(0)=" + ten.use(0));
+        out.add("zero.use(5)=" + zero.use(5));
+        out.add("chained(1)=" + ten.chained(1));
+        out.add("viaLambda(3)=" + ten.viaLambda(3));
+        out.add("describe=" + Empty.describe());
+        return String.join("\n", out);
+    }
+
+    public static void main(String[] args) {
+        System.out.println(runAll());
+    }
+}

@@ -1,0 +1,120 @@
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * String concatenation, which javac compiles to `invokedynamic` against
+ * `StringConcatFactory` from Java 9 onwards.
+ *
+ * The bootstrap carries a recipe string in which  marks an argument and
+ *  marks a constant taken from the trailing bootstrap arguments.
+ * Everything else in it is literal text. A literal  or  in the
+ * source therefore has to travel as a constant rather than inline, which is the
+ * case worth being careful about.
+ *
+ * Anything whose text is not stable across runs is printed as character codes
+ * or with identity hashes masked, so the baseline says the same thing every
+ * time.
+ */
+public class ConcatSample {
+
+    private static final class Custom {
+        private final String name;
+        Custom(String name) { this.name = name; }
+        @Override public String toString() { return "Custom(" + name + ")"; }
+    }
+
+    private static final class NullToString {
+        @Override public String toString() { return null; }
+    }
+
+    static String primitives(boolean z, byte b, short s, char c, int i, long j, float f, double d) {
+        return "z=" + z + " b=" + b + " s=" + s + " c=" + c + " i=" + i
+            + " j=" + j + " f=" + f + " d=" + d;
+    }
+
+    /**
+     * An array must go through string conversion, not the `append(char[])`
+     * overload that would spell its contents out.
+     */
+    static String references(String s, Object o, int[] array, char[] chars) {
+        return "s=" + s + " o=" + o + " a=" + array + " c=" + chars;
+    }
+
+    /** The literals here contain the recipe's own marker characters. */
+    static String markers(String s) {
+        return "" + s + "" + s + "end";
+    }
+
+    static String leadingAndTrailing(int i) {
+        return i + "";
+    }
+
+    static String onlyArguments(String a, String b) {
+        return a + b;
+    }
+
+    static String nested(int i) {
+        return "[" + ("<" + i + ">") + "]";
+    }
+
+    static String inALoop() {
+        String out = "";
+        for (int i = 0; i < 3; i++) {
+            out = out + i + ",";
+        }
+        return out;
+    }
+
+    /** Enough operands that javac has to think about how to group them. */
+    static String many(int a, int b, int c, int d, int e, int f, int g, int h) {
+        return a + "-" + b + "-" + c + "-" + d + "-" + e + "-" + f + "-" + g + "-" + h;
+    }
+
+    static String widening(byte b, short s, char c) {
+        return "" + b + s + c;
+    }
+
+    /** Character codes, so a control character in a result stays printable. */
+    private static String codes(String s) {
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < s.length(); i++) {
+            if (i > 0) out.append('.');
+            out.append((int) s.charAt(i));
+        }
+        return out.toString();
+    }
+
+    private static String maskHashes(String s) {
+        return s.replaceAll("@[0-9a-f]+", "@x");
+    }
+
+    public static String runAll() {
+        List<String> out = new ArrayList<>();
+
+        out.add("primitives=" + primitives(true, (byte) 1, (short) 2, 'x', 3, 4L, 5.5f, 6.5));
+        out.add("primitivesNeg=" + codes(
+            primitives(false, (byte) -1, (short) -2, '\n', -3, -4L, -0.0f, Double.NaN)));
+
+        out.add("references=" + maskHashes(
+            references("s", new Custom("c"), new int[] { 1, 2 }, new char[] { 'a', 'b' })));
+        out.add("referencesNull=" + references(null, null, null, null));
+        // toString() returning null becomes "null" through string conversion.
+        out.add("nullToString=" + references("s", new NullToString(), null, null));
+
+        out.add("markers=" + codes(markers("S")));
+        out.add("markersLength=" + markers("S").length());
+        out.add("leadingAndTrailing=" + leadingAndTrailing(42));
+        out.add("onlyArguments=" + onlyArguments("a", "b"));
+        out.add("onlyArgumentsNull=" + onlyArguments(null, null));
+        out.add("nested=" + nested(7));
+        out.add("inALoop=" + inALoop());
+        out.add("many=" + many(1, 2, 3, 4, 5, 6, 7, 8));
+        out.add("widening=" + widening((byte) 65, (short) 66, 'C'));
+
+        return String.join("\n", out);
+    }
+
+    public static void main(String[] args) {
+        System.out.println(runAll());
+    }
+}

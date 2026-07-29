@@ -178,3 +178,86 @@ publishing {
         }
     }
 }
+
+/**
+ * Runs the downgraded fixtures on a real JDK 8.
+ *
+ * The unit tests run on the Java 17 toolchain, which links `StringConcatFactory`
+ * and accepts `invokeinterface` on a private method quite happily. A downgrade
+ * that would die on Java 8 therefore passes them in silence, and only an actual
+ * Java 8 launcher says otherwise. That is not a hypothetical: it is how the
+ * missing rewrite of the method handle behind a lambda in an interface was
+ * found.
+ *
+ * Contributors only, and only where a JDK 8 toolchain can be provisioned.
+ */
+@DisableCachingByDefault(because = "Runs the fixtures on a real JDK 8 on demand")
+abstract class VerifyOnJava8 @Inject constructor(
+    private val exec: ExecOperations
+) : DefaultTask() {
+
+    @get:Internal
+    abstract val testClasspath: ConfigurableFileCollection
+
+    @get:Internal
+    abstract val workDir: DirectoryProperty
+
+    @get:Internal
+    abstract val dumpLauncher: Property<JavaLauncher>
+
+    @get:Internal
+    abstract val java8Launcher: Property<JavaLauncher>
+
+    @TaskAction
+    fun verify() {
+        val dir = workDir.get().asFile
+
+        // Written by the test sources, which own the fixture plumbing.
+        exec.javaexec {
+            classpath = testClasspath
+            mainClass.set("dev.iiahmed.lowbyte.Java8DumpKt")
+            executable = dumpLauncher.get().executablePath.asFile.absolutePath
+            args(dir.absolutePath)
+        }
+
+        val java8 = java8Launcher.get().executablePath.asFile.absolutePath
+        val failures = mutableListOf<String>()
+
+        dir.listFiles()?.sortedBy { it.name }?.forEach { sample ->
+            val stdout = ByteArrayOutputStream()
+            val result = exec.exec {
+                executable = java8
+                args("-cp", sample.absolutePath, sample.name)
+                standardOutput = stdout
+                errorOutput = stdout
+                isIgnoreExitValue = true
+            }
+
+            val actual = stdout.toString(Charsets.UTF_8.name()).replace("\r\n", "\n").trim()
+            val expected = File(sample, "expected.txt").readText().replace("\r\n", "\n").trim()
+
+            if (result.exitValue != 0 || actual != expected) {
+                failures += "${sample.name} (exit ${result.exitValue}):\n$actual"
+            } else {
+                logger.lifecycle("${sample.name}: matches the Java 21 baseline on Java 8")
+            }
+        }
+
+        check(failures.isEmpty()) {
+            "Java 8 verification failed:\n\n" + failures.joinToString("\n\n")
+        }
+    }
+}
+
+tasks.register<VerifyOnJava8>("verifyOnJava8") {
+    group = "lowbyte"
+    description = "Downgrades the fixtures to Java 8 and runs them on a real JDK 8."
+
+    dependsOn(tasks.named("testClasses"))
+    testClasspath.from(sourceSets["test"].runtimeClasspath)
+    workDir.set(layout.buildDirectory.dir("java8-verify"))
+    dumpLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(17)) })
+    java8Launcher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(8)) })
+
+    outputs.upToDateWhen { false }
+}
