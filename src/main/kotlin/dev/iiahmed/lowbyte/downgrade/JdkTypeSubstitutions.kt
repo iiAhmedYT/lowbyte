@@ -17,7 +17,18 @@ object JdkTypeSubstitutions {
         // deconstruction. IllegalStateException is the closest pre-21 stand-in:
         // also a RuntimeException, and it has the (String, Throwable) constructor
         // javac calls. IncompatibleClassChangeError doesn't.
-        Substitution("java/lang/MatchException", "java/lang/IllegalStateException", introducedIn = 21)
+        Substitution("java/lang/MatchException", "java/lang/IllegalStateException", introducedIn = 21),
+
+        // Every record extends java.lang.Record, so once
+        // [dev.iiahmed.lowbyte.transform.RecordsTransformer] has stripped the
+        // Record attribute the superclass has to come down with it. Remapping
+        // catches the `extends`, the `super()` in the canonical constructor and
+        // the class Signature of a generic record in one go.
+        //
+        // It also rewrites a user's `instanceof Record` into `instanceof Object`,
+        // which stops being a meaningful test. That is the one place this is
+        // lossy, and there is no pre-16 type that would answer it correctly.
+        Substitution("java/lang/Record", "java/lang/Object", introducedIn = 16)
     )
 
     /** Shaped for ASM's SimpleRemapper. */

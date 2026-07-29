@@ -1,0 +1,80 @@
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * The generated equals/hashCode/toString, across every component type and the
+ * cases where the obvious implementation is wrong.
+ *
+ * Everything printed here is deterministic. Identity hash codes are not, so an
+ * array component is never printed or hashed directly, only compared.
+ */
+public class RecordOpsSample {
+
+    record Prims(boolean z, byte b, short s, char c, int i, long j, float f, double d) {}
+    record Refs(String s, int[] a, Object o) {}
+    record Empty() {}
+    record Box<T>(T value) {}
+    record Outer(Prims p, Empty e) {}
+
+    private static Prims prims(float f, double d) {
+        return new Prims(true, (byte) 1, (short) 2, 'x', 3, 4L, f, d);
+    }
+
+    private static String local() {
+        // A record declared in a method compiles to RecordOpsSample$1Local, but
+        // its simple name, and so its toString, drops the number.
+        record Local(int v) {}
+        return new Local(3).toString();
+    }
+
+    public static String runAll() {
+        List<String> out = new ArrayList<>();
+
+        Prims p = prims(5.5f, 6.5);
+        out.add("prims.toString=" + p);
+        out.add("prims.hashCode=" + p.hashCode());
+        out.add("prims.equalsSelf=" + p.equals(p));
+        out.add("prims.equalsCopy=" + p.equals(prims(5.5f, 6.5)));
+        out.add("prims.equalsOther=" + p.equals(prims(5.5f, 7.5)));
+        out.add("prims.equalsNull=" + p.equals(null));
+        out.add("prims.equalsString=" + p.equals("Prims"));
+
+        // Bitwise comparison, not ==: NaN matches itself and 0.0 does not match -0.0.
+        out.add("nan.equals=" + prims(Float.NaN, Double.NaN).equals(prims(Float.NaN, Double.NaN)));
+        out.add("nan.hashCodeStable="
+            + (prims(Float.NaN, Double.NaN).hashCode() == prims(Float.NaN, Double.NaN).hashCode()));
+        out.add("negZero.equals=" + prims(0.0f, 0.0).equals(prims(-0.0f, -0.0)));
+        out.add("negZeroFloat.equals=" + prims(-0.0f, 6.5).equals(prims(0.0f, 6.5)));
+
+        out.add("empty.toString=" + new Empty());
+        out.add("empty.hashCode=" + new Empty().hashCode());
+        out.add("empty.equals=" + new Empty().equals(new Empty()));
+
+        // Reference components go through Objects.equals, so an array compares by
+        // identity and a null component is not a crash.
+        int[] array = { 1, 2 };
+        out.add("refs.toStringNull=" + new Refs(null, null, null));
+        out.add("refs.hashCodeNull=" + new Refs(null, null, null).hashCode());
+        out.add("refs.equalsSameArray=" + new Refs("a", array, null).equals(new Refs("a", array, null)));
+        out.add("refs.equalsEqualArrays="
+            + new Refs("a", array, null).equals(new Refs("a", new int[] { 1, 2 }, null)));
+        out.add("refs.equalsNullComponent=" + new Refs(null, null, null).equals(new Refs(null, null, null)));
+        out.add("refs.equalsNullVsValue=" + new Refs(null, null, null).equals(new Refs("a", null, null)));
+
+        out.add("box.toString=" + new Box<>("hi"));
+        out.add("box.hashCode=" + new Box<>("hi").hashCode());
+        out.add("box.equals=" + new Box<>("hi").equals(new Box<>("hi")));
+        out.add("box.equalsNested=" + new Box<>(new Empty()).equals(new Box<>(new Empty())));
+
+        out.add("outer.toString=" + new Outer(p, new Empty()));
+        out.add("outer.equals=" + new Outer(p, new Empty()).equals(new Outer(prims(5.5f, 6.5), new Empty())));
+
+        out.add("local.toString=" + local());
+
+        return String.join("\n", out);
+    }
+
+    public static void main(String[] args) {
+        System.out.println(runAll());
+    }
+}

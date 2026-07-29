@@ -2,12 +2,15 @@ package dev.iiahmed.lowbyte
 
 import dev.iiahmed.lowbyte.transform.FeatureTransform
 import dev.iiahmed.lowbyte.transform.FeatureTransforms
+import dev.iiahmed.lowbyte.transform.RecordsTransform
+import dev.iiahmed.lowbyte.transform.SealedTypesTransform
 import dev.iiahmed.lowbyte.transform.SwitchBootstrapsTransform
 import org.junit.jupiter.api.Test
 import org.objectweb.asm.ClassVisitor
 import org.objectweb.asm.ClassWriter
 import org.objectweb.asm.Opcodes
 import kotlin.test.assertEquals
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class FeatureTransformsTest {
@@ -82,22 +85,39 @@ class FeatureTransformsTest {
         val writer = ClassWriter(0)
         val chain = FeatureTransforms.chain(writer, targetJava = 21, onUnsupported = {}, transforms = recorders(visited))
 
-        assertTrue(chain === writer, "an empty chain should not wrap the writer")
+        assertSame(chain, writer, "an empty chain should not wrap the writer")
         assertEquals(emptyList(), visited)
     }
 
     @Test
-    fun switchTransformIsRegistered() {
+    fun everyTransformIsRegistered() {
         assertTrue(
-            FeatureTransforms.ALL.contains(SwitchBootstrapsTransform),
-            "SwitchBootstrapsTransform should be in the registry"
+            FeatureTransforms.ALL.containsAll(
+                listOf(RecordsTransform, SealedTypesTransform, SwitchBootstrapsTransform)
+            ),
+            "every transform should be in the registry"
         )
+        assertEquals(16, RecordsTransform.introducedIn)
+        assertEquals(17, SealedTypesTransform.introducedIn)
         assertEquals(21, SwitchBootstrapsTransform.introducedIn)
+    }
+
+    @Test
+    fun eachTargetPicksUpTheFeaturesItCannotExpress() {
+        assertEquals(emptyList(), FeatureTransforms.forTarget(21))
         assertEquals(
             listOf(SwitchBootstrapsTransform),
             FeatureTransforms.forTarget(17),
-            "the switch transform should apply to a Java 17 target"
+            "17 can express records and sealed types, but not pattern switches"
         )
-        assertEquals(emptyList(), FeatureTransforms.forTarget(21))
+        assertEquals(
+            listOf(SealedTypesTransform, SwitchBootstrapsTransform),
+            FeatureTransforms.forTarget(16),
+            "16 has records but not sealed types"
+        )
+        assertEquals(
+            listOf(RecordsTransform, SealedTypesTransform, SwitchBootstrapsTransform),
+            FeatureTransforms.forTarget(11)
+        )
     }
 }

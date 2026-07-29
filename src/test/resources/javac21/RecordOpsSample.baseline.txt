@@ -1,0 +1,27 @@
+prims.toString=Prims[z=true, b=1, s=2, c=x, i=3, j=4, f=5.5, d=6.5]
+prims.hashCode=-669179543
+prims.equalsSelf=true
+prims.equalsCopy=true
+prims.equalsOther=false
+prims.equalsNull=false
+prims.equalsString=false
+nan.equals=true
+nan.hashCodeStable=true
+negZero.equals=false
+negZeroFloat.equals=false
+empty.toString=Empty[]
+empty.hashCode=0
+empty.equals=true
+refs.toStringNull=Refs[s=null, a=null, o=null]
+refs.hashCodeNull=0
+refs.equalsSameArray=true
+refs.equalsEqualArrays=false
+refs.equalsNullComponent=true
+refs.equalsNullVsValue=false
+box.toString=Box[value=hi]
+box.hashCode=3329
+box.equals=true
+box.equalsNested=true
+outer.toString=Outer[p=Prims[z=true, b=1, s=2, c=x, i=3, j=4, f=5.5, d=6.5], e=Empty[]]
+outer.equals=true
+local.toString=Local[v=3]

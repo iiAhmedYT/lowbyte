@@ -6,6 +6,7 @@ import org.objectweb.asm.ClassVisitor
 import org.objectweb.asm.Handle
 import org.objectweb.asm.MethodVisitor
 import org.objectweb.asm.Opcodes
+import org.objectweb.asm.RecordComponentVisitor
 import kotlin.test.fail
 
 /**
@@ -20,6 +21,7 @@ object Fixtures {
 
     private const val ROOT = "/javac21"
     const val SWITCH_BOOTSTRAPS = "java/lang/runtime/SwitchBootstraps"
+    const val OBJECT_METHODS = "java/lang/runtime/ObjectMethods"
 
     /** Class files of [sample], downgraded to [targetJava], keyed by class name. */
     fun downgrade(sample: String, targetJava: Int): Map<String, ByteArray> =
@@ -47,8 +49,57 @@ object Fixtures {
     fun switchCallSites(classBytes: ByteArray): Int =
         countInvokeDynamic(classBytes) { it?.owner == SWITCH_BOOTSTRAPS }
 
+    /** Counts the `ObjectMethods` call sites left in a class. */
+    fun objectMethodsCallSites(classBytes: ByteArray): Int =
+        countInvokeDynamic(classBytes) { it?.owner == OBJECT_METHODS }
+
     /** Counts every `invokedynamic` in a class, whatever its bootstrap. */
     fun invokeDynamicCount(classBytes: ByteArray): Int = countInvokeDynamic(classBytes) { true }
+
+    /** Everything about a class that says "record" or "sealed". */
+    class Shape(
+        val superName: String?,
+        val isRecord: Boolean,
+        val recordComponents: List<String>,
+        val permittedSubclasses: List<String>
+    )
+
+    fun shapeOf(classBytes: ByteArray): Shape {
+        var superName: String? = null
+        var isRecord = false
+        val components = mutableListOf<String>()
+        val permitted = mutableListOf<String>()
+
+        ClassReader(classBytes).accept(object : ClassVisitor(Opcodes.ASM9) {
+            override fun visit(
+                version: Int,
+                access: Int,
+                name: String?,
+                signature: String?,
+                superClass: String?,
+                interfaces: Array<out String>?
+            ) {
+                superName = superClass
+                // ClassReader sets this pseudo flag from the Record attribute.
+                isRecord = (access and Opcodes.ACC_RECORD) != 0
+            }
+
+            override fun visitRecordComponent(
+                name: String?,
+                descriptor: String?,
+                signature: String?
+            ): RecordComponentVisitor? {
+                components += name.orEmpty()
+                return null
+            }
+
+            override fun visitPermittedSubclass(permittedSubclass: String?) {
+                permitted += permittedSubclass.orEmpty()
+            }
+        }, 0)
+
+        return Shape(superName, isRecord, components, permitted)
+    }
 
     private fun countInvokeDynamic(classBytes: ByteArray, predicate: (Handle?) -> Boolean): Int {
         var count = 0

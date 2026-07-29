@@ -76,29 +76,60 @@ load on the exact JDK that compiled them. They trip `failOnUnsupported`.
 ### Feature transforms
 Beyond the header rewrite, Lowbyte rewrites language features the target cannot express.
 
-| Feature                                                      | Introduced | Status                                                                                   |
-|--------------------------------------------------------------|------------|------------------------------------------------------------------------------------------|
-| Pattern-matching `switch` (`SwitchBootstraps.typeSwitch`)    | 21         | Rewritten to a synthetic static matcher                                                  |
-| Enum pattern `switch` (`SwitchBootstraps.enumSwitch`)        | 21         | Rewritten to a synthetic static matcher                                                  |
-| Record patterns (JEP 440)                                    | 21         | javac desugars these already; the `java.lang.MatchException` it leaves behind is swapped |
-| `sealed` types, records                                      | 16-17      | Not yet handled                                                                          |
-| `invokedynamic` string concat, `CONSTANT_Dynamic`, nestmates | 9-11       | Not yet handled                                                                          |
+| Feature                                                   | Introduced | Status                                                                                   |
+|-----------------------------------------------------------|------------|------------------------------------------------------------------------------------------|
+| Pattern-matching `switch` (`SwitchBootstraps.typeSwitch`) | 21         | Rewritten to a synthetic static matcher                                                  |
+| Enum pattern `switch` (`SwitchBootstraps.enumSwitch`)     | 21         | Rewritten to a synthetic static matcher                                                  |
+| Record patterns (JEP 440)                                 | 21         | javac desugars these already; the `java.lang.MatchException` it leaves behind is swapped |
+| `sealed` types (`PermittedSubclasses`)                    | 17         | Attribute dropped, which is all sealedness is                                            |
+| Records (`Record`, `ObjectMethods`)                       | 16         | Turned into an ordinary final class with generated `equals`/`hashCode`/`toString`        |
+| Nestmates (`NestHost`/`NestMembers`)                      | 11         | Not yet handled                                                                          |
+| `invokedynamic` string concat, private interface methods  | 9          | Not yet handled                                                                          |
 
-**Java 21 to 17 is covered.** Lower targets are not. Going below 17 still needs the
-`sealed` and record work, and below 11 the indified string concat and nestmate work.
+**Java 21 to 11 is covered.** Lower targets are not. Going below 11 still needs the
+nestmate work, and below 9 the indified string concat and private interface methods.
+`CONSTANT_Dynamic` is not on the list because javac does not emit it.
 
-Every rewritten call site gets a `private static synthetic int lowbyte$typeSwitch$N(...)`
-method (or `lowbyte$enumSwitch$N`) in the same class, built out of `instanceof` and
-`equals` chains, and the `invokedynamic` turns into an `invokestatic`. No runtime class
-is injected and nothing uses reflection, so the jar stays self-contained.
+Every rewritten call site gets a `private static synthetic` method in the same class and
+the `invokedynamic` turns into an `invokestatic`. No runtime class is injected and nothing
+uses reflection, so the jar stays self-contained.
 
-The two bootstraps differ in one place only: what a `String` label means. Under
-`typeSwitch` it is compared to the selector itself, under `enumSwitch` to
+#### Pattern switches
+`lowbyte$typeSwitch$N` (or `lowbyte$enumSwitch$N`) is built out of `instanceof` and
+`equals` chains. The two bootstraps differ in one place only: what a `String` label means.
+Under `typeSwitch` it is compared to the selector itself, under `enumSwitch` to
 `selector.name()`.
 
+#### Records
+The `Record` attribute goes, `java.lang.Record` becomes `java.lang.Object`, and each
+`ObjectMethods` call site becomes `lowbyte$recordToString$N`, `lowbyte$recordHashCode$N`
+or `lowbyte$recordEquals$N`. The accessors, fields and canonical constructor javac already
+emitted need no help.
+
+The generated bodies match the bootstrap rather than the obvious implementation:
+`float` and `double` components compare bitwise, so `NaN` equals itself and `0.0` does not
+equal `-0.0`; `hashCode` folds `31 * result + hash(component)` from zero; `toString`
+formats as `SimpleName[a=1, b=2]`.
+
+What a downgraded record loses is its reflective identity. `Class.isRecord()` returns
+false and `getRecordComponents()` returns null, so anything reading a record generically
+at runtime, serialization frameworks especially, will no longer recognise it. Record
+patterns already compiled into the jar are unaffected, since javac desugared those into
+accessor calls before Lowbyte saw them.
+
+A user's `instanceof Record` becomes `instanceof Object` and stops being a meaningful
+test. There is no pre-16 type that would answer it correctly.
+
+#### Sealed types
+Dropping `PermittedSubclasses` gives up the link-time check, so a class compiled later
+against the downgraded jar can extend a type that was sealed. Source still cannot do it
+without recompiling against the original.
+
 Correctness is pinned by a differential test. `src/test/resources/javac21` holds real
-javac 21 output, and the expected values are what those switches printed running on an
-actual JDK 21, with the bootstraps linked by the JDK itself.
+javac 21 output, and the expected values are what those samples printed running on an
+actual JDK 21, with the bootstraps linked by the JDK itself. The same classes are
+downgraded to both 17 and 11 and have to print the same thing either way, so the generated
+code is checked against real bootstrap behaviour rather than against a reading of the spec.
 
 #### Regenerating the fixtures
 Only the `*.java.txt` sources in `src/test/resources/javac21` are hand-written. Everything
@@ -142,4 +173,4 @@ reached, which happens if a sealed hierarchy is recompiled without its switches.
 | `regenerateJavac21Fixtures` | Rebuilds the checked-in Java 21 test fixtures. Contributors only.       |
 
 ## License
-This plugin is licensed under the [MIT License]()
+This plugin is licensed under the [MIT License](LICENSE)

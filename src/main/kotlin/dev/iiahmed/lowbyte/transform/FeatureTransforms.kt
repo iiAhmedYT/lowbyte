@@ -6,6 +6,8 @@ import org.objectweb.asm.ClassVisitor
 object FeatureTransforms {
 
     val ALL: List<FeatureTransform> = listOf(
+        RecordsTransform,
+        SealedTypesTransform,
         SwitchBootstrapsTransform
     )
 
