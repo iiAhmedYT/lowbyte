@@ -1,6 +1,7 @@
 package dev.iiahmed.lowbyte
 
 import dev.iiahmed.lowbyte.downgrade.DowngradeContext
+import dev.iiahmed.lowbyte.transform.ApiTransform
 import dev.iiahmed.lowbyte.transform.ConstantDynamicTransform
 import dev.iiahmed.lowbyte.transform.FeatureTransform
 import dev.iiahmed.lowbyte.transform.FeatureTransforms
@@ -122,26 +123,28 @@ class FeatureTransformsTest {
 
     @Test
     fun eachTargetPicksUpTheFeaturesItCannotExpress() {
-        assertEquals(emptyList(), FeatureTransforms.forTarget(21))
+        // The API check has no release below which it stops mattering, so it is
+        // the one transform that applies at every target.
+        assertEquals(listOf(ApiTransform), FeatureTransforms.forTarget(21))
         assertEquals(
-            listOf(SwitchBootstrapsTransform),
+            listOf(SwitchBootstrapsTransform, ApiTransform),
             FeatureTransforms.forTarget(17),
             "17 can express records and sealed types, but not pattern switches"
         )
         assertEquals(
-            listOf(SealedTypesTransform, SwitchBootstrapsTransform),
+            listOf(SealedTypesTransform, SwitchBootstrapsTransform, ApiTransform),
             FeatureTransforms.forTarget(16),
             "16 has records but not sealed types"
         )
         assertEquals(
-            listOf(RecordsTransform, SealedTypesTransform, SwitchBootstrapsTransform),
+            listOf(RecordsTransform, SealedTypesTransform, SwitchBootstrapsTransform, ApiTransform),
             FeatureTransforms.forTarget(11),
             "11 is where nestmates arrived, so they still hold there"
         )
         assertEquals(
             listOf(
                 ConstantDynamicTransform, NestmatesTransform, RecordsTransform,
-                SealedTypesTransform, SwitchBootstrapsTransform
+                SealedTypesTransform, SwitchBootstrapsTransform, ApiTransform
             ),
             FeatureTransforms.forTarget(9),
             "the condy detector sorts innermost, so it sees the finished stream"

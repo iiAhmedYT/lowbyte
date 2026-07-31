@@ -3,6 +3,10 @@
 Lowbyte is a Gradle plugin that downgrades the bytecode version of compiled classes,
 so a jar built with a newer JDK can still run on an older JVM.
 
+It does more than rewrite the version in the header: the language features baked into the
+bytecode are lowered too, so pattern switches, records, sealed types and the rest keep
+working on a JVM that never had them.
+
 ## ➕ Add to your project
 Add this repo to your plugin repositories:
 ```kt
@@ -39,6 +43,10 @@ lowbyte {
     // is scanned first, so one run lists every problem rather than the first one.
     failOnUnsupported.set(true)
 
+    // Rebuild calls to JDK APIs the target never had, and warn about the rest.
+    // Off by default. See APIs.md
+    api.set(false)
+
     // Set the pattern for the jar file (starting from the `build` directory)
     jarFilePattern.set("libs/${project.name}-${project.version}.jar") // The default is "libs/${project.name}.jar"
 }
@@ -65,237 +73,51 @@ tasks.named("downgradeBytecode") {
 The `dependsOn` is not optional. Without it the task can run before the shaded jar
 exists.
 
-## Supported Versions
+## Supported versions
 Targets Java 8 through 25. Any source version in that range can be downgraded to any
-lower version in that range, so a Java 21 project can target Java 17, 11 or 8.
-Classes already at or below the target are copied through untouched.
+lower version in that range, so a Java 21 project can target Java 17, 11 or 8. Classes
+already at or below the target are copied through untouched.
 
-Preview-feature classes (minor version `0xFFFF`) cannot be downgraded, since they only
-load on the exact JDK that compiled them. They trip `failOnUnsupported`.
+**Java 21 down to 8 is covered**, including pattern switches, records, sealed types,
+nestmates, string concatenation and private interface method call sites. See
+[LOGIC.md](LOGIC.md) for what each of those involves.
 
-`module-info.class` is lowered like anything else, down to Java 9. It has to be: the
-runtime version-checks a module descriptor the same way it checks a class, so one left at
-21 in a jar targeting 11 makes that jar unusable on the module path of the very JVM it was
-downgraded for.
+## Things worth knowing
 
-Targeting Java 8 the root descriptor is **dropped**, with a warning, and the jar stops
-being a module. No version helps: left high, anything scanning the jar gets an
-`UnsupportedClassVersionError`, and lowered to 8 it gets a `ClassFormatError`, because
-`CONSTANT_Module` does not exist before class file 53. To a JVM a module descriptor is
-still a class file, and walking every `.class` entry and defining it is ordinary behaviour
-for component scanners and shading tools, so the entry is a hazard however it is written.
+**Modern syntax is fine. Modern APIs are not.** Language features are the whole point:
+write records, sealed types and pattern switches, compile them with a current JDK, and
+Lowbyte lowers them into something an old JVM runs. The JDK *library* is the one thing it
+cannot lower, because no amount of rewriting bytecode adds `List.of` to a Java 8
+`java.util.List`.
 
-A copy under `META-INF/versions/` is kept instead of dropped, since Java 8 never resolves
-a class name out of that directory and the copy still describes the module for the newer
-JVMs that read it.
+So a call to a method the target never had, and `List.reversed()` and `Thread.ofVirtual()`
+are both Java 21, produces a class that loads and verifies perfectly well at the lower
+version, then fails the first time that line actually runs: `NoSuchMethodError` for a
+missing method, `NoClassDefFoundError` for a missing class. By default nothing reports it
+at build time, so a branch that rarely runs can ship broken and surface much later.
 
-### Signed jars
-A signature covers digests of the entries, so rewriting a class breaks it. Lowbyte drops
-the signature block (`META-INF/*.SF`, `*.RSA`, `*.DSA`, `*.EC`, `SIG-*`) and strips the
-per-entry digests from `META-INF/MANIFEST.MF`, leaving every other manifest attribute
-alone, then warns that it did so. The output is an unsigned jar rather than one that fails
-verification, which is the better of the two. Re-sign it afterwards if you need it signed.
+`api.set(true)` is what to reach for. It rebuilds a short list of those calls and warns
+about every other JDK member the target did not have. See [APIs.md](APIs.md). The
+warnings never fail the build, since a call sitting behind a runtime version check is
+perfectly correct.
 
-### Exclusions
-`excludedClasses` matches on name boundaries, not as a bare prefix. Excluding `com.foo`
-covers that package and not `com.foobar` beside it, and excluding a class covers the nested
-classes that belong to it. Dots and slashes are both accepted.
+Note that `--release 8` is *not* the way to get this. It would reject the records and
+pattern switches Lowbyte exists to lower, since it pins the language level as well as the
+API.
 
-### Feature transforms
-Beyond the header rewrite, Lowbyte rewrites language features the target cannot express.
+**Signed jars come out unsigned.** A signature covers digests of the entries, so rewriting
+a class breaks it. Lowbyte drops the signature block and warns. Re-sign afterwards if you
+need it signed.
 
-| Feature                                                   | Introduced | Status                                                                                   |
-|-----------------------------------------------------------|------------|------------------------------------------------------------------------------------------|
-| Pattern-matching `switch` (`SwitchBootstraps.typeSwitch`) | 21         | Rewritten to a synthetic static matcher                                                  |
-| Enum pattern `switch` (`SwitchBootstraps.enumSwitch`)     | 21         | Rewritten to a synthetic static matcher                                                  |
-| Record patterns (JEP 440)                                 | 21         | javac desugars these already; the `java.lang.MatchException` it leaves behind is swapped |
-| `sealed` types (`PermittedSubclasses`)                    | 17         | Attribute dropped, which is all sealedness is                                            |
-| Records (`Record`, `ObjectMethods`)                       | 16         | Turned into an ordinary final class with generated `equals`/`hashCode`/`toString`        |
-| Nestmates (`NestHost`/`NestMembers`)                      | 11         | Attributes dropped and the pre-11 access bridges generated                               |
-| `CONSTANT_Dynamic`                                        | 11         | Qualified enum labels are read and lowered, anything else is reported                    |
-| `invokedynamic` string concat (`StringConcatFactory`)     | 9          | Rebuilt as a `StringBuilder` chain in a generated static method                          |
-| Private interface method call sites                       | 9          | `invokeinterface` corrected to `invokespecial`                                           |
+**Targeting Java 8 drops `module-info.class`**, with a warning, and the jar stops being a
+module. There is no class file version at which a module descriptor is both valid and
+loadable on Java 8.
 
-**Java 21 to 8 is covered.**
+**Preview-feature classes cannot be downgraded.** They only load on the exact JDK that
+compiled them, so they trip `failOnUnsupported`.
 
-#### Qualified enum labels and `CONSTANT_Dynamic`
-javac does emit condy. A qualified enum constant in a pattern switch is not a string label
-the way an enum switch's is:
-
-```java
-switch (o) {
-    case Color.RED -> 1;   // label is a CONSTANT_Dynamic java.lang.Enum$EnumDesc
-    ...
-}
-```
-
-The `typeSwitch` label is an `Enum$EnumDesc` built through `ConstantBootstraps.invoke`,
-nested one level deep because the `ClassDesc` handed to `EnumDesc.of` is itself a condy.
-Lowbyte reads the enum's name and the constant's name back out of those two constants and
-emits a `getstatic` of the field plus an identity comparison. Enum constants are
-singletons, so that is the same test the resolved `EnumDesc` would have performed, and it
-resolves at link time rather than on first use.
-
-Two consequences worth knowing. Lowering the label drops the last reference to those
-constants, so the writer must not inherit the original constant pool: an orphaned condy in
-a class file below version 55 is a `ClassFormatError` at load time whether or not anything
-still refers to it. Lowbyte therefore rebuilds the pool from what it actually emits.
-
-Condy reached any other way, an `ldc` of one or some other bootstrap argument, is reported
-rather than lowered. Lowering it in general is not a rewrite but an evaluation: the
-bootstrap would have to run at class-init time into a static field, which is only sound
-when it has no side effects and its arguments are themselves representable.
-`ConstantBootstraps.invoke` of an arbitrary method handle is neither, so Lowbyte stops the
-build instead of guessing. Without that check the class would simply fail to load, since
-below Java 11 condy is not a legal constant pool entry at all.
-
-Every rewritten call site gets a `private static synthetic` method in the same class and
-the `invokedynamic` turns into an `invokestatic`. No runtime class is injected and nothing
-uses reflection, so the jar stays self-contained.
-
-#### Pattern switches
-`lowbyte$typeSwitch$N` (or `lowbyte$enumSwitch$N`) is built out of `instanceof` and
-`equals` chains. The two bootstraps differ in one place only: what a `String` label means.
-Under `typeSwitch` it is compared to the selector itself, under `enumSwitch` to
-`selector.name()`.
-
-#### Records
-The `Record` attribute goes, `java.lang.Record` becomes `java.lang.Object`, and each
-`ObjectMethods` call site becomes `lowbyte$recordToString$N`, `lowbyte$recordHashCode$N`
-or `lowbyte$recordEquals$N`. The accessors, fields and canonical constructor javac already
-emitted need no help.
-
-The generated bodies match the bootstrap rather than the obvious implementation:
-`float` and `double` components compare bitwise, so `NaN` equals itself and `0.0` does not
-equal `-0.0`; `hashCode` folds `31 * result + hash(component)` from zero; `toString`
-formats as `SimpleName[a=1, b=2]`.
-
-What a downgraded record loses is its reflective identity. `Class.isRecord()` returns
-false and `getRecordComponents()` returns null, so anything reading a record generically
-at runtime, serialization frameworks especially, will no longer recognise it. Record
-patterns already compiled into the jar are unaffected, since javac desugared those into
-accessor calls before Lowbyte saw them.
-
-A user's `instanceof Record` becomes `instanceof Object` and stops being a meaningful
-test. There is no pre-16 type that would answer it correctly.
-
-#### Sealed types
-Dropping `PermittedSubclasses` gives up the link-time check, so a class compiled later
-against the downgraded jar can extend a type that was sealed. Source still cannot do it
-without recompiling against the original.
-
-#### String concatenation
-Since Java 9 javac compiles `a + b` to an `invokedynamic` against
-`java.lang.invoke.StringConcatFactory`, which does not exist on 8, so the call site dies
-with a `BootstrapMethodError` the first time it runs. Lowbyte rebuilds the `StringBuilder`
-chain javac used to emit, in a `lowbyte$concat$N` method.
-
-It goes in a generated method rather than inline for a mechanical reason: by the time the
-`invokedynamic` is reached the operands are already on the stack, and a `StringBuilder`
-chain needs its `new`/`dup` *before* them. A static call consumes exactly the operands
-sitting there, so nothing has to be reordered.
-
-The bootstrap's recipe marks an argument with U+0001 and a constant with U+0002, and
-everything else is literal text. Constants exist only so that one of those two characters
-appearing in your source cannot be mistaken for a marker; both are known at rewrite time,
-so they are folded together into one run of text.
-
-#### Private interface methods
-`ACC_PRIVATE` on an interface method has been legal since class file 52, so the
-declaration needs nothing and a Java 8 JVM loads it happily. The *call* is the problem:
-javac emits `invokeinterface`, and Java 8 answers
-
-```
-IncompatibleClassChangeError: private interface method requires invokespecial,
-not invokeinterface
-```
-
-A private method is not virtual, so only the opcode moves and dispatch is unchanged. The
-same correction is needed on the method handle behind a lambda declared in an interface,
-whose body is itself a private interface method; missing that leaves a
-`BootstrapMethodError` at link time rather than a failure at load time.
-
-#### Nestmates
-Since Java 11 a class may read a private field of another class in its nest directly, and
-javac emits exactly that. The permission comes from `NestHost` and `NestMembers`, so
-dropping them turns every such access into an `IllegalAccessError`.
-
-Each reached member therefore gets a package-private `static lowbyte$access$N` accessor on
-the class that *owns* it, and the call site invokes that instead. Package-private is
-enough, because a nest is a top-level class plus its nested classes and those always share
-a package. This is what javac itself did before nestmates existed.
-
-Constructors work differently. `new Foo(...)` compiles to `new`, `dup`, arguments,
-`invokespecial`, and the `new` can sit arbitrarily far from the `invokespecial`, so
-swapping in a static factory would mean pairing them back up by dataflow. Instead the
-owner gains a package-private constructor overload taking one extra argument of an
-otherwise empty generated type, `Foo$lowbyte$Nest`, and the call site passes null. Those
-marker classes are the only entries in the output jar that did not come from an entry in
-the input. javac 8 did the same thing with an anonymous class.
-
-This is also the one transform that cannot work from a single class file. A call site
-names an owner, a name and a descriptor, but never the access flags, so whether
-`Outer.secret` needs a bridge is a fact about a *different* class. Lowbyte therefore reads
-every class in the jar before writing any of it, and if a bridge is ever owed by a class
-that was excluded or absent, that is reported rather than shipped as a
-`NoSuchMethodError`.
-
-Correctness is pinned by a differential test. `src/test/resources/javac21` holds real
-javac 21 output, and the expected values are what those samples printed running on an
-actual JDK 21, with the bootstraps linked by the JDK itself. The same classes are
-downgraded to 17, 11 and 9 and have to print the same thing every time, so the generated
-code is checked against real bootstrap behaviour rather than against a reading of the spec.
-Each target adds a layer: 17 lowers the switches, 11 also lowers records and sealed types,
-9 additionally unpicks the nests.
-
-#### Regenerating the fixtures
-Only the `*.java.txt` sources in `src/test/resources/javac21` are hand-written. Everything
-else there is generated:
-
-```sh
-./gradlew regenerateJavac21Fixtures
-```
-
-That compiles and runs each sample on a JDK 21 toolchain and rewrites `<Name>.classdata`
-(the compiled classes), `<Name>.classes.txt` (which classes belong to the sample) and
-`<Name>.baseline.txt` (its output on real Java 21). Add a case to a sample, or a whole new
-`.java.txt`, then run it. The tests pick the new fixtures up with no code change.
-
-#### Verifying on a real Java 8
-The unit tests run on the Java 17 toolchain, which links `StringConcatFactory` and accepts
-`invokeinterface` on a private method without complaint. A downgrade that would die on
-Java 8 therefore passes them in silence.
-
-```sh
-./gradlew verifyOnJava8
-```
-
-runs every sample downgraded to 8 on an actual JDK 8 launcher and compares it to the same
-Java 21 baseline. It needs a JDK 8 toolchain, so it is contributors-only, and it is worth
-running for anything touching a target below 9. It is how the missing rewrite of the
-method handle behind a lambda in an interface was found: every in-process test passed.
-
-`toolchain.txt` records which JDK produced the current generation. That matters, because
-javac's desugaring is not identical across builds of the same release, so regenerating on
-another machine can legitimately change the class files. It is also why the tests assert
-*behaviour* against the recorded baseline instead of pinning instruction counts.
-
-### What a bytecode downgrade cannot do
-Lowbyte rewrites bytecode, not API usage. Code calling a JDK method that does not exist on
-the target, say `List.reversed()` or `Thread.ofVirtual()`, produces a class that verifies
-fine at the lower version and then throws `NoSuchMethodError` at runtime. Lowbyte does not
-detect this and `failOnUnsupported` will not catch it.
-
-Compile against the target's API (`--release 17`, or a matching toolchain) and use Lowbyte
-only to lower the class file version and the language features baked into it.
-`JdkApiLimitationTest` pins this behaviour so it stays visible.
-
-There is one exception: a JDK *class* that javac references on its own. For record and
-sealed pattern switches that is `java.lang.MatchException` (Java 21), which gets remapped
-to `java.lang.IllegalStateException`. That is also a `RuntimeException` and has the same
-`(String, Throwable)` constructor javac calls. It is only thrown from the impossible branch
-of an exhaustive switch, so the change of type is observable just when that branch is
-reached, which happens if a sealed hierarchy is recompiled without its switches.
+**Exclusions match on name boundaries.** Excluding `com.foo` covers that package and not
+`com.foobar` beside it, and excluding a class covers its nested classes.
 
 ## Tasks
 | Task                        | Description                                                             |
@@ -303,6 +125,13 @@ reached, which happens if a sealed hierarchy is recompiled without its switches.
 | `downgradeBytecode`         | Rewrites every class in the input jar to the target class file version. |
 | `regenerateJavac21Fixtures` | Rebuilds the checked-in Java 21 test fixtures. Contributors only.       |
 | `verifyOnJava8`             | Runs the downgraded fixtures on a real JDK 8. Contributors only.        |
+
+## Further reading
+| Document                           | What is in it                                                        |
+|------------------------------------|----------------------------------------------------------------------|
+| [LOGIC.md](LOGIC.md)               | How each feature is lowered, and what a downgrade costs you          |
+| [APIs.md](APIs.md)                 | The JDK APIs `api.set(true)` rebuilds, and why the list is short     |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Fixtures, the Java 8 verification, and adding a transform or rewrite |
 
 ## License
 This plugin is licensed under the [MIT License](LICENSE)

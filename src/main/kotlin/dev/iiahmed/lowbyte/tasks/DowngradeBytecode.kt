@@ -1,5 +1,7 @@
 package dev.iiahmed.lowbyte.tasks
 
+import dev.iiahmed.lowbyte.api.ApiIndex
+import dev.iiahmed.lowbyte.api.ApiSettings
 import dev.iiahmed.lowbyte.classfile.ClassFileVersion
 import dev.iiahmed.lowbyte.downgrade.ClassDowngrader
 import dev.iiahmed.lowbyte.downgrade.DowngradeContext
@@ -31,6 +33,9 @@ abstract class DowngradeBytecode @Inject constructor() : DefaultTask() {
     @get:Input
     abstract val failOnUnsupported: Property<Boolean>
 
+    @get:Input
+    abstract val api: Property<Boolean>
+
     @get:InputFile
     abstract val inputJar: RegularFileProperty
 
@@ -40,6 +45,9 @@ abstract class DowngradeBytecode @Inject constructor() : DefaultTask() {
     init {
         group = "lowbyte"
         description = "Downgrades the class file version of every class in the jar."
+
+        // Matches the extension's default, and keeps the task usable on its own.
+        api.convention(false)
     }
 
     @TaskAction
@@ -70,7 +78,12 @@ abstract class DowngradeBytecode @Inject constructor() : DefaultTask() {
             // private member of a nestmate says nothing about that member's
             // access flags, so the answer lives in a class file we may not have
             // reached yet.
-            val context = DowngradeContext(scanNests(jar, target))
+            val apiFindings = linkedSetOf<String>()
+            val context = DowngradeContext(
+                nests = scanNests(jar, target),
+                api = apiSettings(target),
+                onApiFinding = { apiFindings += it }
+            )
             val written = mutableSetOf<String>()
 
             var droppedSignatures = 0
@@ -138,6 +151,8 @@ abstract class DowngradeBytecode @Inject constructor() : DefaultTask() {
                 )
             }
 
+            reportApi(apiFindings, target)
+
             // A bridge that was never emitted is a NoSuchMethodError waiting to
             // happen, so an owner we never rewrote is reported rather than shipped.
             (context.nests.bridgedOwners - written).forEach {
@@ -149,6 +164,52 @@ abstract class DowngradeBytecode @Inject constructor() : DefaultTask() {
         logger.lifecycle("Downgraded jar written to: ${output.absolutePath}")
 
         report(findings, output)
+    }
+
+    /**
+     * What the target release's JDK actually had, when asked for.
+     *
+     * Read from the build JDK's own `ct.sym`, the file `javac --release` uses.
+     */
+    private fun apiSettings(target: Int): ApiSettings? {
+        if (!api.get()) return null
+
+        val ctSym = ApiIndex.currentJdkCtSym()
+        if (ctSym == null) {
+            logger.warn(
+                "Lowbyte: the API check was asked for, but the JDK running Gradle ships no " +
+                    "lib/ct.sym. Calls with a rebuild still get one; the rest cannot be " +
+                    "reported, because nothing says what Java $target had."
+            )
+            return ApiSettings(target, ApiIndex.EMPTY)
+        }
+
+        val index = ApiIndex.read(ctSym, target)
+        if (index.isEmpty) {
+            logger.warn(
+                "Lowbyte: the API check was asked for, but ${ctSym.absolutePath} has no data for " +
+                    "Java $target. Calls with a rebuild still get one; the rest cannot be " +
+                    "reported. Run Gradle on a newer JDK to enable that half."
+            )
+        }
+        return ApiSettings(target, index)
+    }
+
+    /**
+     * API findings are warnings, whatever `failOnUnsupported` says.
+     *
+     * A call into a newer JDK may sit behind a runtime version check, in which
+     * case the reference is real, the code is correct, and it is never reached.
+     * Failing that build would be wrong.
+     */
+    private fun reportApi(findings: Set<String>, target: Int) {
+        if (findings.isEmpty()) return
+
+        logger.warn(
+            "Lowbyte: ${findings.size} call(s) into APIs Java $target does not have. These were " +
+                "left alone, and will throw at runtime unless guarded by a version check:\n" +
+                findings.joinToString("\n") { "  - $it" }
+        )
     }
 
     /**

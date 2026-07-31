@@ -14,13 +14,15 @@ fun main(arguments: Array<String>) {
     val root = File(arguments.single())
     root.deleteRecursively()
 
-    Fixtures.SAMPLES.forEach { sample ->
+    val all = Fixtures.SAMPLES.map { it to false } + Fixtures.API_SAMPLES.map { it to true }
+
+    all.forEach { (sample, api) ->
         val directory = File(root, sample).apply { mkdirs() }
-        Fixtures.downgrade(sample, targetJava = 8).forEach { (name, classBytes) ->
+        Fixtures.downgrade(sample, targetJava = 8, api = api).forEach { (name, classBytes) ->
             File(directory, "$name.class").writeBytes(classBytes)
         }
         File(directory, "expected.txt").writeText(Fixtures.baseline(sample))
     }
 
-    println("Wrote ${Fixtures.SAMPLES.size} samples to $root")
+    println("Wrote ${all.size} samples to $root")
 }

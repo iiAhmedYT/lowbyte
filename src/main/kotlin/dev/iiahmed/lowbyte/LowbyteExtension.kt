@@ -19,4 +19,18 @@ abstract class LowbyteExtension @Inject constructor(objects: ObjectFactory) {
 
     /** Off turns the same findings into warnings. Either way the whole jar is scanned. */
     val failOnUnsupported: Property<Boolean> = objects.property(Boolean::class.java).convention(true)
+
+    /**
+     * Look at the JDK APIs the code calls, not just the bytecode it is made of.
+     *
+     * Off by default, because it is the one part of Lowbyte that changes calls
+     * the target could have linked perfectly well.
+     *
+     * On, the calls with an exact pre-target equivalent are rewritten, and
+     * everything else that the target's JDK does not have is warned about.
+     * Those warnings never fail the build however [failOnUnsupported] is set:
+     * code that guards a newer call behind a version check still has the call in
+     * its bytecode, and that is correct code we must not reject.
+     */
+    val api: Property<Boolean> = objects.property(Boolean::class.java).convention(false)
 }

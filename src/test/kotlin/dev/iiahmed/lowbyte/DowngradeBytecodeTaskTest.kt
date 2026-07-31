@@ -253,6 +253,24 @@ class DowngradeBytecodeTaskTest {
     }
 
     @Test
+    fun apiFindingsNeverFailTheBuild() {
+        // String.isBlank has no faithful Java 8 equivalent, so it is reported.
+        // A call like that may well sit behind a runtime version check, which is
+        // correct code, so it must not fail the build however failOnUnsupported
+        // is set.
+        val outputFile = File(tempDir, "out.jar")
+        val inputFile = jarOf(mapOf("Blank.class" to isBlankCaller()))
+
+        task(inputFile, outputFile, target = 8, api = true, failOnUnsupported = true).downgrade()
+
+        assertTrue(outputFile.exists(), "an API finding must not delete the jar")
+        assertEquals(
+            8,
+            ClassFileVersion.toJavaVersion(Fixtures.majorVersionOf(readJar(outputFile).getValue("Blank.class")))
+        )
+    }
+
+    @Test
     fun anUnsupportedConstructFailsTheBuildAndDeletesTheJar() {
         val outputFile = File(tempDir, "out.jar")
         val inputFile = jarOf(mapOf("Condy.class" to condyClass()))
@@ -299,7 +317,8 @@ class DowngradeBytecodeTaskTest {
         output: File,
         target: Int,
         excluded: List<String> = emptyList(),
-        failOnUnsupported: Boolean = true
+        failOnUnsupported: Boolean = true,
+        api: Boolean = false
     ): DowngradeBytecode {
         val project = ProjectBuilder.builder().withProjectDir(tempDir).build()
         return project.tasks.create("downgrade${target}${output.name.hashCode()}", DowngradeBytecode::class.java)
@@ -307,9 +326,29 @@ class DowngradeBytecodeTaskTest {
                 targetJavaVersion.set(target)
                 excludedClasses.set(excluded)
                 this.failOnUnsupported.set(failOnUnsupported)
+                this.api.set(api)
                 inputJar.set(input)
                 outputJar.set(output)
             }
+    }
+
+    /** A Java 21 class calling String.isBlank, which cannot be rebuilt. */
+    private fun isBlankCaller(): ByteArray {
+        val cw = ClassWriter(ClassWriter.COMPUTE_MAXS)
+        cw.visit(
+            ClassFileVersion.fromJavaVersion(21),
+            Opcodes.ACC_PUBLIC or Opcodes.ACC_SUPER,
+            "Blank", null, "java/lang/Object", null
+        )
+        val mv = cw.visitMethod(Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC, "go", "(Ljava/lang/String;)Z", null, null)
+        mv.visitCode()
+        mv.visitVarInsn(Opcodes.ALOAD, 0)
+        mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "isBlank", "()Z", false)
+        mv.visitInsn(Opcodes.IRETURN)
+        mv.visitMaxs(0, 0)
+        mv.visitEnd()
+        cw.visitEnd()
+        return cw.toByteArray()
     }
 
     private fun jarOf(entries: Map<String, ByteArray>): File {

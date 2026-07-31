@@ -16,6 +16,7 @@ abstract class LowbytePlugin : Plugin<Project> {
             targetJavaVersion.set(extension.targetJavaVersion)
             excludedClasses.set(extension.excludedClasses)
             failOnUnsupported.set(extension.failOnUnsupported)
+            api.set(extension.api)
 
             val inputFileLocation = extension.jarFilePattern.getOrElse("libs/${project.name}.jar")
             inputJar.set(project.layout.buildDirectory.file(inputFileLocation))

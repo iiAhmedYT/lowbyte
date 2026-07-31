@@ -1,5 +1,7 @@
 package dev.iiahmed.lowbyte
 
+import dev.iiahmed.lowbyte.api.ApiIndex
+import dev.iiahmed.lowbyte.api.ApiSettings
 import dev.iiahmed.lowbyte.classfile.ClassFileVersion
 import dev.iiahmed.lowbyte.downgrade.ClassDowngrader
 import dev.iiahmed.lowbyte.downgrade.DowngradeContext
@@ -35,6 +37,9 @@ object Fixtures {
         "EnumDescSample", "ConcatSample", "InterfaceSample"
     )
 
+    /** Samples that only make sense with the opt-in API conversion turned on. */
+    val API_SAMPLES = listOf("ApiConversionSample")
+
     const val SWITCH_BOOTSTRAPS = "java/lang/runtime/SwitchBootstraps"
     const val OBJECT_METHODS = "java/lang/runtime/ObjectMethods"
     const val STRING_CONCAT_FACTORY = "java/lang/invoke/StringConcatFactory"
@@ -46,7 +51,7 @@ object Fixtures {
      * [dev.iiahmed.lowbyte.tasks.DowngradeBytecode] does them, so a sample that
      * reaches across its own nest is downgraded as it would be in a real jar.
      */
-    fun downgrade(sample: String, targetJava: Int): Map<String, ByteArray> {
+    fun downgrade(sample: String, targetJava: Int, api: Boolean = false): Map<String, ByteArray> {
         val originals = classNames(sample).associateWith { readClass(it) }
 
         val nests = if (targetJava < NestRegistry.INTRODUCED_IN) {
@@ -54,7 +59,12 @@ object Fixtures {
         } else {
             NestRegistry.EMPTY
         }
-        val context = DowngradeContext(nests)
+        val apiFindings = mutableListOf<String>()
+        val context = DowngradeContext(
+            nests = nests,
+            api = if (api) ApiSettings(targetJava, apiIndexFor(targetJava)) else null,
+            onApiFinding = { apiFindings += it }
+        )
 
         val downgraded = originals.mapValues { (name, classBytes) ->
             ClassDowngrader.downgrade(classBytes, targetJava, context) { fail("$name: unsupported: $it") }
@@ -67,6 +77,10 @@ object Fixtures {
 
         return downgraded
     }
+
+    /** The API index for a release, or empty when this JDK cannot supply one. */
+    fun apiIndexFor(targetJava: Int): ApiIndex =
+        ApiIndex.currentJdkCtSym()?.let { ApiIndex.read(it, targetJava) } ?: ApiIndex.EMPTY
 
     /** The nest registry a sample's own classes produce. */
     fun nestsOf(sample: String): NestRegistry =
@@ -102,6 +116,31 @@ object Fixtures {
 
     /** Counts every `invokedynamic` in a class, whatever its bootstrap. */
     fun invokeDynamicCount(classBytes: ByteArray): Int = countInvokeDynamic(classBytes) { true }
+
+    /** Every method a class calls, as `owner.name+descriptor`. */
+    fun methodCallTargets(classBytes: ByteArray): Set<String> {
+        val targets = mutableSetOf<String>()
+        ClassReader(classBytes).accept(object : ClassVisitor(Opcodes.ASM9) {
+            override fun visitMethod(
+                access: Int,
+                name: String?,
+                descriptor: String?,
+                signature: String?,
+                exceptions: Array<out String>?
+            ) = object : MethodVisitor(Opcodes.ASM9) {
+                override fun visitMethodInsn(
+                    opcode: Int,
+                    insnOwner: String?,
+                    insnName: String?,
+                    insnDescriptor: String?,
+                    isInterface: Boolean
+                ) {
+                    targets += "${insnOwner.orEmpty()}.${insnName.orEmpty()}${insnDescriptor.orEmpty()}"
+                }
+            }
+        }, 0)
+        return targets
+    }
 
     /** The methods of [owner] reached by `invokeinterface`, as `name+descriptor`. */
     fun invokeInterfaceTargets(classBytes: ByteArray, owner: String): Set<String> {

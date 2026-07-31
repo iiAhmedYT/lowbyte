@@ -1,0 +1,131 @@
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.TreeSet;
+
+/**
+ * The Java 9+ APIs Lowbyte can rebuild faithfully.
+ *
+ * Everything asserted here is contract, not implementation. Set.of and Map.of
+ * document their iteration order as unspecified, so the order is never printed;
+ * what is printed is what the contract promises, which is rejection of nulls
+ * and duplicates, refusal to mutate, and equality with an equivalent collection.
+ */
+public class ApiConversionSample {
+
+    private static String attempt(Runnable r) {
+        try { r.run(); return "ok"; }
+        catch (Throwable t) { return t.getClass().getSimpleName(); }
+    }
+
+    /** Sorted, so an unspecified iteration order cannot leak into the output. */
+    private static String sorted(Iterable<String> values) {
+        return new TreeSet<>((java.util.Collection<String>) values).toString();
+    }
+
+    public static String runAll() {
+        List<String> out = new ArrayList<>();
+
+        List<String> list = List.of("b", "a", "b");
+        out.add("list=" + list);
+        out.add("list.size=" + list.size());
+        out.add("list.equals=" + list.equals(java.util.Arrays.asList("b", "a", "b")));
+        out.add("list.add=" + attempt(() -> list.add("c")));
+        out.add("list.set=" + attempt(() -> list.set(0, "c")));
+        out.add("list.ofNull=" + attempt(() -> List.of((String) null)));
+        out.add("list.empty=" + List.of());
+
+        Set<String> set = Set.of("b", "a");
+        out.add("set.sorted=" + sorted(set));
+        out.add("set.size=" + set.size());
+        out.add("set.contains=" + set.contains("a"));
+        out.add("set.equals=" + set.equals(new java.util.HashSet<>(java.util.Arrays.asList("a", "b"))));
+        out.add("set.add=" + attempt(() -> set.add("c")));
+        out.add("set.ofNull=" + attempt(() -> Set.of((String) null)));
+        out.add("set.ofDuplicate=" + attempt(() -> Set.of("a", "a")));
+
+        Map<String, Integer> map = Map.of("b", 2, "a", 1);
+        out.add("map.size=" + map.size());
+        out.add("map.get=" + map.get("a") + "," + map.get("b"));
+        out.add("map.sortedKeys=" + sorted(map.keySet()));
+        out.add("map.put=" + attempt(() -> map.put("c", 3)));
+        out.add("map.ofNullValue=" + attempt(() -> Map.of("k", (Integer) null)));
+        out.add("map.ofDuplicateKey=" + attempt(() -> Map.of("k", 1, "k", 2)));
+        out.add("map.empty=" + Map.of());
+
+        Map.Entry<String, Integer> entry = Map.entry("k", 1);
+        out.add("entry=" + entry);
+        out.add("entry.setValue=" + attempt(() -> entry.setValue(2)));
+        out.add("entry.ofNull=" + attempt(() -> Map.entry("k", (Integer) null)));
+
+        out.add("optional.isEmpty=" + Optional.empty().isEmpty() + "," + Optional.of("x").isEmpty());
+        out.add("optional.orElseThrow=" + Optional.of("x").orElseThrow());
+        out.add("optional.orElseThrowEmpty=" + attempt(() -> Optional.empty().orElseThrow()));
+
+        out.add("repeat=" + "ab".repeat(3));
+        out.add("repeatZero=[" + "ab".repeat(0) + "]");
+        out.add("repeatNegative=" + attempt(() -> "ab".repeat(-1)));
+
+        out.add("requireNonNullElse=" + Objects.requireNonNullElse("a", "b")
+            + "," + Objects.requireNonNullElse(null, "b"));
+        out.add("requireNonNullElseBothNull=" + attempt(() -> Objects.requireNonNullElse(null, null)));
+
+        // Past ten elements javac switches to the varargs overload.
+        List<String> bigList = List.of("a","b","c","d","e","f","g","h","i","j","k");
+        out.add("bigList=" + bigList);
+        out.add("bigList.add=" + attempt(() -> bigList.add("z")));
+        out.add("bigList.ofNull=" + attempt(
+            () -> List.of("a","b","c","d","e","f","g","h","i","j",(String) null)));
+
+        Set<String> bigSet = Set.of("a","b","c","d","e","f","g","h","i","j","k");
+        out.add("bigSet.size=" + bigSet.size());
+        out.add("bigSet.sorted=" + sorted(bigSet));
+        out.add("bigSet.add=" + attempt(() -> bigSet.add("z")));
+        out.add("bigSet.ofDuplicate=" + attempt(
+            () -> Set.of("a","b","c","d","e","f","g","h","i","j","a")));
+        out.add("bigSet.ofNull=" + attempt(
+            () -> Set.of("a","b","c","d","e","f","g","h","i","j",(String) null)));
+
+        Map<String, String> entries = Map.ofEntries(Map.entry("a", "1"), Map.entry("b", "2"));
+        out.add("ofEntries.size=" + entries.size());
+        out.add("ofEntries.get=" + entries.get("a") + "," + entries.get("b"));
+        out.add("ofEntries.put=" + attempt(() -> entries.put("c", "3")));
+        out.add("ofEntries.duplicateKey=" + attempt(
+            () -> Map.ofEntries(Map.entry("k", "1"), Map.entry("k", "2"))));
+
+        // copyOf snapshots, and unlike Set.of it drops a repeat rather than
+        // refusing it.
+        List<String> mutable = new ArrayList<>(Arrays.asList("x", "y"));
+        List<String> listCopy = List.copyOf(mutable);
+        Set<String> setCopy = Set.copyOf(Arrays.asList("a", "a", "b"));
+        mutable.add("z");
+        out.add("listCopy=" + listCopy);
+        out.add("listCopy.isSnapshot=" + (listCopy.size() == 2));
+        out.add("listCopy.add=" + attempt(() -> listCopy.add("z")));
+        out.add("listCopy.ofNullElement=" + attempt(() -> List.copyOf(Arrays.asList("a", null))));
+        out.add("setCopy.size=" + setCopy.size());
+        out.add("setCopy.sorted=" + sorted(setCopy));
+        out.add("setCopy.repeatsDropped=ok");
+
+        Map<String, String> sourceMap = new LinkedHashMap<>();
+        sourceMap.put("a", "1");
+        Map<String, String> mapCopy = Map.copyOf(sourceMap);
+        sourceMap.put("b", "2");
+        out.add("mapCopy.size=" + mapCopy.size());
+        out.add("mapCopy.put=" + attempt(() -> mapCopy.put("c", "3")));
+        Map<String, String> withNullValue = new LinkedHashMap<>();
+        withNullValue.put("k", null);
+        out.add("mapCopy.nullValue=" + attempt(() -> Map.copyOf(withNullValue)));
+
+        return String.join("\n", out);
+    }
+
+    public static void main(String[] args) {
+        System.out.println(runAll());
+    }
+}

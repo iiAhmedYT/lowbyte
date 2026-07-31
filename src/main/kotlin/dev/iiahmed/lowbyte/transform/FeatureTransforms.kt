@@ -16,7 +16,10 @@ object FeatureTransforms {
         NestmatesTransform,
         RecordsTransform,
         SealedTypesTransform,
-        SwitchBootstrapsTransform
+        SwitchBootstrapsTransform,
+        // Outermost, so it sees the calls the code actually made rather than
+        // anything the transforms below it generated.
+        ApiTransform
     )
 
     /** Oldest feature first. */
