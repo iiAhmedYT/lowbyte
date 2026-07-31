@@ -3,6 +3,7 @@ package dev.iiahmed.lowbyte.api
 import org.objectweb.asm.Label
 import org.objectweb.asm.MethodVisitor
 import org.objectweb.asm.Opcodes
+import org.objectweb.asm.Type
 
 /**
  * The pieces every [ApiRewrite] builds out of.
@@ -17,24 +18,40 @@ object ApiBytecode {
 
     const val OBJECT = "Ljava/lang/Object;"
     const val OBJECT_ARRAY = "[Ljava/lang/Object;"
-    const val ENTRY_ARRAY = "[Ljava/util/Map\$Entry;"
 
     const val LIST = "java/util/List"
     const val SET = "java/util/Set"
     const val MAP = "java/util/Map"
-    const val MAP_ENTRY = "java/util/Map\$Entry"
     const val COLLECTION = "java/util/Collection"
     const val OPTIONAL = "java/util/Optional"
     const val OBJECTS = "java/util/Objects"
-    const val STRING = "java/lang/String"
+
+    /** An interface, so its static methods are called with the interface flag set. */
+    const val STREAM = "java/util/stream/Stream"
 
     const val ARRAY_LIST = "java/util/ArrayList"
     const val LINKED_HASH_SET = "java/util/LinkedHashSet"
-    const val LINKED_HASH_MAP = "java/util/LinkedHashMap"
     const val COLLECTIONS = "java/util/Collections"
     const val SIMPLE_IMMUTABLE_ENTRY = "java/util/AbstractMap\$SimpleImmutableEntry"
-    const val STRING_BUILDER = "java/lang/StringBuilder"
     const val ILLEGAL_ARGUMENT = "java/lang/IllegalArgumentException"
+
+    /**
+     * Whether a factory call is every-argument-an-element, or the single array
+     * the varargs overload passes.
+     *
+     * `List.of` and `Set.of` share both shapes: up to ten elements javac calls a
+     * fixed-arity overload, and past that the varargs one.
+     */
+    fun isFactoryShape(descriptor: String): Boolean {
+        val arguments = Type.getArgumentTypes(descriptor)
+        return arguments.all { it.descriptor == OBJECT } || isVarargs(descriptor)
+    }
+
+    /** Whether the call passes its elements as one array. */
+    fun isVarargs(descriptor: String): Boolean {
+        val arguments = Type.getArgumentTypes(descriptor)
+        return arguments.size == 1 && arguments[0].descriptor == OBJECT_ARRAY
+    }
 
     /** Builds a collection and parks it in [slot]. */
     fun newCollection(mv: MethodVisitor, type: String, slot: Int) {
@@ -62,13 +79,6 @@ object ApiBytecode {
         mv.visitVarInsn(Opcodes.ALOAD, 0)
         mv.visitVarInsn(Opcodes.ILOAD, slots.index)
         mv.visitInsn(Opcodes.AALOAD)
-        requireNonNull(mv)
-    }
-
-    /** `entry.getX()`, null-checked, left on the stack. */
-    fun entryPart(mv: MethodVisitor, slots: ApiSlots, accessor: String) {
-        mv.visitVarInsn(Opcodes.ALOAD, slots.entry)
-        mv.visitMethodInsn(Opcodes.INVOKEINTERFACE, MAP_ENTRY, accessor, "()$OBJECT", true)
         requireNonNull(mv)
     }
 

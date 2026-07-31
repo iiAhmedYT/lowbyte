@@ -33,4 +33,14 @@ abstract class LowbyteExtension @Inject constructor(objects: ObjectFactory) {
      * its bytecode, and that is correct code we must not reject.
      */
     val api: Property<Boolean> = objects.property(Boolean::class.java).convention(false)
+
+    /**
+     * Where the injected utility class goes, when [api] needs one.
+     *
+     * Left alone the name is derived from the utility's own bytes and the
+     * methods kept from it, so two jars holding the same methods agree on both
+     * the name and the contents and shading them together is harmless. Set one
+     * to relocate it, and keeping it distinct becomes your problem.
+     */
+    val runtimeClass: Property<String> = objects.property(String::class.java)
 }

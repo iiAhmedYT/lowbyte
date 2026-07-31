@@ -6,8 +6,12 @@ release cannot express, each lowered by a `FeatureTransform` in
 
 Transforms are stacked newest-feature-outermost, so whatever one emits still falls through
 the older ones beneath it. Every rewritten call site becomes a `private static synthetic`
-method in the same class and an `invokestatic`. No runtime class is injected and nothing
-uses reflection, so the jar stays self-contained.
+method in the same class and an `invokestatic`. No feature transform injects a class or
+uses reflection.
+
+The one thing that does add a class is the opt-in API rebuild, and only when a jar calls
+something it covers. See [APIs.md](APIs.md). Either way nothing outside the jar is
+needed at runtime.
 
 For the opt-in JDK API rebuilds, see [APIs.md](APIs.md).
 
@@ -59,8 +63,8 @@ build instead of guessing. Without that check the class would simply fail to loa
 below Java 11 condy is not a legal constant pool entry at all.
 
 Every rewritten call site gets a `private static synthetic` method in the same class and
-the `invokedynamic` turns into an `invokestatic`. No runtime class is injected and nothing
-uses reflection, so the jar stays self-contained.
+the `invokedynamic` turns into an `invokestatic`. Nothing here injects a class or uses
+reflection.
 
 ### Pattern switches
 `lowbyte$typeSwitch$N` (or `lowbyte$enumSwitch$N`) is built out of `instanceof` and

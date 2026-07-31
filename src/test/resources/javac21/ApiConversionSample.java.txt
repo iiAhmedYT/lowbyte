@@ -1,3 +1,4 @@
+import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -7,6 +8,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * The Java 9+ APIs Lowbyte can rebuild faithfully.
@@ -67,6 +70,19 @@ public class ApiConversionSample {
         out.add("optional.orElseThrow=" + Optional.of("x").orElseThrow());
         out.add("optional.orElseThrowEmpty=" + attempt(() -> Optional.empty().orElseThrow()));
 
+        // ofNullable is the JDK's own null check: empty() for null, and
+        // otherwise the same single-element stream of(T) builds.
+        out.add("ofNullable=" + Stream.ofNullable("x").collect(Collectors.toList()));
+        out.add("ofNullableNull=" + Stream.ofNullable(null).collect(Collectors.toList()));
+        out.add("ofNullable.count=" + Stream.ofNullable("x").count()
+            + "," + Stream.ofNullable(null).count());
+        // A stream is consumed once, so a branch returning a shared constant
+        // rather than a fresh stream would show up here.
+        Stream<String> reused = Stream.ofNullable("x");
+        out.add("ofNullable.firstUse=" + reused.count());
+        out.add("ofNullable.secondUse=" + attempt(() -> reused.count()));
+        out.add("ofNullable.nullElement=" + Stream.of((String) null).count());
+
         out.add("repeat=" + "ab".repeat(3));
         out.add("repeatZero=[" + "ab".repeat(0) + "]");
         out.add("repeatNegative=" + attempt(() -> "ab".repeat(-1)));
@@ -97,6 +113,15 @@ public class ApiConversionSample {
         out.add("ofEntries.put=" + attempt(() -> entries.put("c", "3")));
         out.add("ofEntries.duplicateKey=" + attempt(
             () -> Map.ofEntries(Map.entry("k", "1"), Map.entry("k", "2"))));
+        // Map.entry refuses a null of its own, so reaching ofEntries' checks
+        // needs an entry type that does not.
+        out.add("ofEntries.nullValue=" + attempt(
+            () -> Map.ofEntries(new AbstractMap.SimpleEntry<String, String>("k", null))));
+        out.add("ofEntries.nullKey=" + attempt(
+            () -> Map.ofEntries(new AbstractMap.SimpleEntry<String, String>(null, "v"))));
+        out.add("ofEntries.nullEntry=" + attempt(
+            () -> Map.ofEntries((Map.Entry<String, String>) null)));
+        out.add("ofEntries.empty=" + Map.ofEntries());
 
         // copyOf snapshots, and unlike Set.of it drops a repeat rather than
         // refusing it.
@@ -116,6 +141,12 @@ public class ApiConversionSample {
         sourceMap.put("a", "1");
         Map<String, String> mapCopy = Map.copyOf(sourceMap);
         sourceMap.put("b", "2");
+        // Map.entrySet is Java 8 and must survive untouched. Rewriting Map.entry
+        // on a name prefix would take it too, so the call is made here rather
+        // than left to turn up incidentally inside some rewrite's own output.
+        out.add("entrySet.size=" + sourceMap.entrySet().size());
+        out.add("entrySet.first=" + sourceMap.entrySet().iterator().next());
+
         out.add("mapCopy.size=" + mapCopy.size());
         out.add("mapCopy.put=" + attempt(() -> mapCopy.put("c", "3")));
         Map<String, String> withNullValue = new LinkedHashMap<>();

@@ -19,7 +19,10 @@ fun main(arguments: Array<String>) {
     all.forEach { (sample, api) ->
         val directory = File(root, sample).apply { mkdirs() }
         Fixtures.downgrade(sample, targetJava = 8, api = api).forEach { (name, classBytes) ->
-            File(directory, "$name.class").writeBytes(classBytes)
+            // Binary name to path, since the injected utility has a package.
+            val target = File(directory, name.replace('.', '/') + ".class")
+            target.parentFile.mkdirs()
+            target.writeBytes(classBytes)
         }
         File(directory, "expected.txt").writeText(Fixtures.baseline(sample))
     }

@@ -39,6 +39,37 @@ kotlin {
     jvmToolchain(17)
 }
 
+/**
+ * The utility class Lowbyte injects into a downgraded jar.
+ *
+ * Plain Java at release 8, so it loads on every target Lowbyte supports, and so
+ * a replacement can be written as a method rather than as hand-emitted bytecode
+ * with hand-written stack frames.
+ *
+ * Its classes are packaged as `.classdata`, the same trick the test fixtures
+ * use, so nothing mistakes them for classes on the plugin's own classpath.
+ */
+val runtime: SourceSet by sourceSets.creating
+
+tasks.named<JavaCompile>("compileRuntimeJava") {
+    options.release.set(8)
+    options.compilerArgs.add("-Xlint:-options")
+}
+
+val runtimeResources = layout.buildDirectory.dir("generated/runtime-resources")
+
+val packageRuntime by tasks.registering(Copy::class) {
+    description = "Packages the Lowbyte runtime classes into the build dir as .classdata, so they can be injected into a downgraded jar."
+    from(runtime.output.classesDirs)
+    into(runtimeResources.map { it.dir("lowbyte-runtime") })
+    include("**/*.class")
+    rename { it.removeSuffix(".class") + ".classdata" }
+}
+
+sourceSets.main {
+    resources.srcDir(packageRuntime.map { runtimeResources.get() })
+}
+
 gradlePlugin {
     plugins {
         create("lowbytePlugin") {

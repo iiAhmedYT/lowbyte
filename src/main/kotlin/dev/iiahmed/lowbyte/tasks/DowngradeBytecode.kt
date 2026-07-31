@@ -1,7 +1,9 @@
 package dev.iiahmed.lowbyte.tasks
 
 import dev.iiahmed.lowbyte.api.ApiIndex
+import dev.iiahmed.lowbyte.api.ApiRewrites
 import dev.iiahmed.lowbyte.api.ApiSettings
+import dev.iiahmed.lowbyte.api.RuntimeApi
 import dev.iiahmed.lowbyte.classfile.ClassFileVersion
 import dev.iiahmed.lowbyte.downgrade.ClassDowngrader
 import dev.iiahmed.lowbyte.downgrade.DowngradeContext
@@ -35,6 +37,10 @@ abstract class DowngradeBytecode @Inject constructor() : DefaultTask() {
 
     @get:Input
     abstract val api: Property<Boolean>
+
+    @get:Input
+    @get:Optional
+    abstract val runtimeClass: Property<String>
 
     @get:InputFile
     abstract val inputJar: RegularFileProperty
@@ -79,9 +85,14 @@ abstract class DowngradeBytecode @Inject constructor() : DefaultTask() {
             // access flags, so the answer lives in a class file we may not have
             // reached yet.
             val apiFindings = linkedSetOf<String>()
+
+            // The injected utility is named after what it ends up holding, so
+            // which methods a jar needs has to be known before a call site can
+            // be pointed at it.
+            val runtimeMethods = scanRuntimeUsage(jar, target)
             val context = DowngradeContext(
                 nests = scanNests(jar, target),
-                api = apiSettings(target),
+                api = apiSettings(target, runtimeMethods),
                 onApiFinding = { apiFindings += it }
             )
             val written = mutableSetOf<String>()
@@ -132,6 +143,7 @@ abstract class DowngradeBytecode @Inject constructor() : DefaultTask() {
                 }
 
                 untouched += writeMarkerClasses(jos, context, target)
+                untouched += writeRuntimeClass(jos, context, runtimeMethods)
             }
 
             if (droppedSignatures > 0) {
@@ -171,7 +183,45 @@ abstract class DowngradeBytecode @Inject constructor() : DefaultTask() {
      *
      * Read from the build JDK's own `ct.sym`, the file `javac --release` uses.
      */
-    private fun apiSettings(target: Int): ApiSettings? {
+    /**
+     * Which utility methods the jar needs, before anything is written.
+     *
+     * Empty unless the API check is on, and empty when nothing in the jar calls
+     * something the utility covers, in which case no class is injected at all.
+     */
+    private fun scanRuntimeUsage(jar: JarFile, target: Int): Set<String> {
+        if (!api.get()) return emptySet()
+
+        val needed = mutableSetOf<String>()
+        classEntries(jar).forEach { entry ->
+            needed += ApiRewrites.runtimeMethodsNeeded(jar.getInputStream(entry).readAllBytes(), target)
+        }
+        return needed
+    }
+
+    /**
+     * Adds the utility, trimmed to what was used and stripped of annotations.
+     *
+     * Nothing is written when nothing needed it.
+     */
+    private fun writeRuntimeClass(
+        jos: JarOutputStream,
+        context: DowngradeContext,
+        methods: Set<String>
+    ): Int {
+        val settings = context.api
+        if (settings == null || methods.isEmpty()) return 0
+
+        val name = settings.runtimeClassName
+        jos.putNextEntry(ZipEntry("$name.class"))
+        jos.write(RuntimeApi.inject(name, methods))
+        jos.closeEntry()
+
+        logger.lifecycle("Injected $name with ${methods.size} method(s): ${methods.sorted().joinToString(", ")}")
+        return 1
+    }
+
+    private fun apiSettings(target: Int, runtimeMethods: Set<String>): ApiSettings? {
         if (!api.get()) return null
 
         val ctSym = ApiIndex.currentJdkCtSym()
@@ -181,7 +231,7 @@ abstract class DowngradeBytecode @Inject constructor() : DefaultTask() {
                     "lib/ct.sym. Calls with a rebuild still get one; the rest cannot be " +
                     "reported, because nothing says what Java $target had."
             )
-            return ApiSettings(target, ApiIndex.EMPTY)
+            return ApiSettings(target, ApiIndex.EMPTY, runtimeClassName(runtimeMethods))
         }
 
         val index = ApiIndex.read(ctSym, target)
@@ -192,8 +242,18 @@ abstract class DowngradeBytecode @Inject constructor() : DefaultTask() {
                     "reported. Run Gradle on a newer JDK to enable that half."
             )
         }
-        return ApiSettings(target, index)
+        return ApiSettings(target, index, runtimeClassName(runtimeMethods))
     }
+
+    /**
+     * Where the injected utility goes.
+     *
+     * The default is content-addressed, so two jars holding the same methods
+     * agree on the name and the bytes. Setting one by hand is for builds that
+     * relocate it, and then keeping it distinct is the build's problem.
+     */
+    private fun runtimeClassName(methods: Set<String>): String =
+        runtimeClass.orNull?.replace('.', '/') ?: RuntimeApi.defaultClassName(methods)
 
     /**
      * API findings are warnings, whatever `failOnUnsupported` says.

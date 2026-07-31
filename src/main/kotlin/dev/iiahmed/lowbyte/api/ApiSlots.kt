@@ -22,9 +22,6 @@ class ApiSlots(descriptor: String) {
     /** The loop counter. */
     val index: Int = collection + 1
 
-    /** Scratch, for the entry a map loop is looking at. */
-    val entry: Int = collection + 2
-
     /**
      * A full frame covering the arguments plus whatever the rewrite has stored.
      *

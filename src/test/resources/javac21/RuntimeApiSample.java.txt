@@ -1,0 +1,120 @@
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * APIs that need the injected utility rather than an inline rebuild.
+ *
+ * These are the ones a generated method body cannot express faithfully.
+ * `String.isBlank` and `strip` go by `Character.isWhitespace`, where `trim`
+ * cuts everything at or below U+0020 and nothing above it, so the two disagree
+ * on U+00A0, which is not whitespace, and on U+2028, which is.
+ */
+public class RuntimeApiSample {
+
+    private static String codes(String s) {
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < s.length(); i++) {
+            if (i > 0) out.append('.');
+            out.append((int) s.charAt(i));
+        }
+        return out.toString();
+    }
+
+    /**
+     * Control characters spelled out, so the baseline stays a text file.
+     *
+     * The message for a trailing backslash carries a real NUL, which git would
+     * otherwise take as a sign the whole fixture is binary.
+     */
+    private static String printable(String s) {
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c < 32) out.append('<').append((int) c).append('>'); else out.append(c);
+        }
+        return out.toString();
+    }
+
+    public static String runAll() {
+        List<String> out = new ArrayList<String>();
+        String[] cases = { "", " ", "\u00A0", "\u2028", "a", " a ", "\t\n x \u2028", "\u000B\u001C" };
+
+        for (String s : cases) {
+            out.add("isBlank(" + codes(s) + ")=" + s.isBlank());
+            out.add("strip(" + codes(s) + ")=" + codes(s.strip()));
+            out.add("stripLeading(" + codes(s) + ")=" + codes(s.stripLeading()));
+            out.add("stripTrailing(" + codes(s) + ")=" + codes(s.stripTrailing()));
+        }
+
+        // A terminator ends a line rather than starting one, so the trailing and
+        // empty cases are where a split-based stand-in would give itself away.
+        String[] lineCases = {
+            "", "a", "a\n", "\n", "\n\n", "a\n\nb", "a\r\nb", "a\rb", "a\r\n", "\r\r",
+            " a \n\tb\t", "a\n\n\n"
+        };
+        for (String s : lineCases) {
+            List<String> lines = new ArrayList<String>();
+            for (String line : s.lines().toArray(String[]::new)) lines.add(codes(line));
+            out.add("lines(" + codes(s) + ")=" + lines.size() + lines);
+        }
+
+        // Negative shifts cannot take more than a line has, and MIN_VALUE takes
+        // all of it rather than wrapping when negated.
+        String[] indentCases = { "", "a", "a\n", "  a\n    b", "\ta\r\n  b\r", "   \n  x" };
+        int[] amounts = { 2, 0, -1, -3, -100, Integer.MIN_VALUE };
+        for (String s : indentCases) {
+            for (int n : amounts) {
+                out.add("indent(" + codes(s) + "," + n + ")=" + codes(s.indent(n)));
+            }
+        }
+
+        // A closing blank line counts towards the common indent; other blank
+        // lines do not, and a trailing terminator opts out of the whole thing.
+        String[] stripIndentCases = {
+            "", "a", "  a", "  a\n   b", "  a\n\n   b", "    a\n  b\n  ", "  a\n  b\n    ",
+            "  a  \n  b\t", "  a\n   b\n", "\n  a", "   ", "  a\r\n   b",
+            // A closing blank line narrower than every other line sets the
+            // indent on its own, which is the whole reason it is looked at.
+            "    a\n    b\n  ", "      a\n    b\n ", "    a\n    b\n\t"
+        };
+        for (String s : stripIndentCases) {
+            out.add("stripIndent(" + codes(s) + ")=" + codes(s.stripIndent()));
+        }
+
+        // Not rewritten, and deliberately checked anyway: String only declared
+        // these in 9, so a 21 build calls String.chars, but CharSequence has had
+        // them as default methods since 8 and that is where the call resolves.
+        out.add("chars=" + " a ".chars().sum());
+        out.add("codePoints=" + " a ".codePoints().sum());
+
+        out.add("transform=" + "ab".transform(v -> "<" + v + ">"));
+        out.add("transformLength=" + "abc".transform(String::length));
+        out.add("formatted=" + "%s/%s".formatted("a", "b"));
+        out.add("formattedPad=" + "%03d".formatted(7));
+        out.add("formattedNone=" + "plain".formatted());
+
+        // Every escape the JDK decoder knows, plus the three that are not
+        // escapes at all: a line continuation, an overlong octal, and a
+        // backslash with nothing after it.
+        String[] escapeCases = {
+            "", "plain", "\\n", "\\r", "\\t", "\\b", "\\f", "\\s", "\\'", "\\\"", "\\\\",
+            "\\0", "\\7", "\\41", "\\101", "\\377", "\\400", "\\8", "a\\\nb", "a\\\r\nb",
+            "a\\\rb", "x\\", "\\q"
+        };
+        for (String s : escapeCases) {
+            String result;
+            try {
+                result = codes(s.translateEscapes());
+            } catch (IllegalArgumentException e) {
+                result = "IAE:" + printable(e.getMessage());
+            }
+            out.add("translateEscapes(" + codes(s) + ")=" + result);
+        }
+
+        return String.join("\n", out);
+    }
+
+    public static void main(String[] args) {
+        System.out.println(runAll());
+    }
+}

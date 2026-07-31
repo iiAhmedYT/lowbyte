@@ -47,6 +47,10 @@ lowbyte {
     // Off by default. See APIs.md
     api.set(false)
 
+    // Where the utility class goes, when `api` needs one. Defaults to a
+    // content-addressed name under dev.iiahmed.lowbyte.runtime
+    // runtimeClass.set("com.example.shaded.LowbyteApi")
+
     // Set the pattern for the jar file (starting from the `build` directory)
     jarFilePattern.set("libs/${project.name}-${project.version}.jar") // The default is "libs/${project.name}.jar"
 }
@@ -90,14 +94,14 @@ Lowbyte lowers them into something an old JVM runs. The JDK *library* is the one
 cannot lower, because no amount of rewriting bytecode adds `List.of` to a Java 8
 `java.util.List`.
 
-So a call to a method the target never had, and `List.reversed()` and `Thread.ofVirtual()`
+So a call to a method the target never had `List.reversed()` and `Thread.ofVirtual()`
 are both Java 21, produces a class that loads and verifies perfectly well at the lower
 version, then fails the first time that line actually runs: `NoSuchMethodError` for a
 missing method, `NoClassDefFoundError` for a missing class. By default nothing reports it
 at build time, so a branch that rarely runs can ship broken and surface much later.
 
 `api.set(true)` is what to reach for. It rebuilds a short list of those calls and warns
-about every other JDK member the target did not have. See [APIs.md](APIs.md). The
+about every other JDK member the target did not have, see [APIs.md](APIs.md). The
 warnings never fail the build, since a call sitting behind a runtime version check is
 perfectly correct.
 

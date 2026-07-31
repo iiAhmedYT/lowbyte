@@ -1,8 +1,11 @@
 package dev.iiahmed.lowbyte.transform
 
+import dev.iiahmed.lowbyte.api.ApiCallSite
 import dev.iiahmed.lowbyte.api.ApiRewrite
 import dev.iiahmed.lowbyte.api.ApiRewrites
 import dev.iiahmed.lowbyte.api.ApiSettings
+import dev.iiahmed.lowbyte.api.InlineRewrite
+import dev.iiahmed.lowbyte.api.RuntimeReplacement
 import dev.iiahmed.lowbyte.downgrade.DowngradeContext
 import org.objectweb.asm.ClassVisitor
 import org.objectweb.asm.MethodVisitor
@@ -54,7 +57,7 @@ class ApiTransformer(
         const val HELPER_PREFIX = "lowbyte\$api\$"
     }
 
-    private class Helper(val name: String, val descriptor: String, val rewrite: ApiRewrite)
+    private class Helper(val name: String, val descriptor: String, val rewrite: InlineRewrite)
 
     private var className = ""
     private var isInterface = false
@@ -108,16 +111,44 @@ class ApiTransformer(
                 return
             }
 
+            // Whether to replace a call is decided by the release alone. The
+            // index is not consulted, so this keeps working where it cannot be
+            // read.
             val rewrite = ApiRewrites.forCall(owner, name, descriptor)
-
-            // Whether to rebuild is decided by the release alone. The index is
-            // not consulted, so this keeps working where it cannot be read.
             if (rewrite == null || settings.targetJava >= rewrite.introducedIn) {
-                if (rewrite == null) reportIfMissing(owner, name, descriptor)
+                reportIfMissing(owner, name, descriptor)
                 super.visitMethodInsn(opcode, owner, name, descriptor, isInterface)
                 return
             }
 
+            // What happens next is the rewrite's to decide, not ours.
+            rewrite.apply(
+                ApiCallSite(
+                    owner = owner,
+                    name = name,
+                    descriptor = descriptor,
+                    rebuildInline = { inline -> rebuildInline(opcode, owner, descriptor, inline) },
+                    forwardToRuntime = { replacement -> forwardToRuntime(replacement) }
+                )
+            )
+        }
+
+        /**
+         * Points the call at the injected utility.
+         *
+         * An instance call already has its receiver below the arguments, which
+         * is the order the utility method takes them in, so this is a straight
+         * swap of opcode and owner with nothing generated at the call site.
+         */
+        private fun forwardToRuntime(replacement: RuntimeReplacement) {
+            super.visitMethodInsn(
+                Opcodes.INVOKESTATIC, settings.runtimeClassName,
+                replacement.method, replacement.methodDescriptor, false
+            )
+        }
+
+        /** Points the call at a generated method in this class. */
+        private fun rebuildInline(opcode: Int, owner: String, descriptor: String, rewrite: InlineRewrite) {
             // An instance call leaves its receiver on the stack, so the generated
             // method has to take it as a first parameter or the operands no
             // longer match. The rewrites all read their arguments from slot 0.

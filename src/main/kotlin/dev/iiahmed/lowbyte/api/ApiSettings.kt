@@ -12,4 +12,13 @@ package dev.iiahmed.lowbyte.api
  * what happens on a JDK that ships no usable `ct.sym`: the rebuilds carry on and
  * only the reporting goes quiet.
  */
-class ApiSettings(val targetJava: Int, val index: ApiIndex)
+class ApiSettings(
+    val targetJava: Int,
+    val index: ApiIndex,
+    /**
+     * Where the injected utility will live.
+     *
+     * Fixed before any class is rewritten, since a call site has to name it.
+     */
+    val runtimeClassName: String = RuntimeApi.defaultClassName(emptySet())
+)

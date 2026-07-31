@@ -1,7 +1,9 @@
 package dev.iiahmed.lowbyte
 
 import dev.iiahmed.lowbyte.api.ApiIndex
+import dev.iiahmed.lowbyte.api.ApiRewrites
 import dev.iiahmed.lowbyte.api.ApiSettings
+import dev.iiahmed.lowbyte.api.RuntimeApi
 import dev.iiahmed.lowbyte.classfile.ClassFileVersion
 import dev.iiahmed.lowbyte.downgrade.ClassDowngrader
 import dev.iiahmed.lowbyte.downgrade.DowngradeContext
@@ -38,7 +40,7 @@ object Fixtures {
     )
 
     /** Samples that only make sense with the opt-in API conversion turned on. */
-    val API_SAMPLES = listOf("ApiConversionSample")
+    val API_SAMPLES = listOf("ApiConversionSample", "RuntimeApiSample")
 
     const val SWITCH_BOOTSTRAPS = "java/lang/runtime/SwitchBootstraps"
     const val OBJECT_METHODS = "java/lang/runtime/ObjectMethods"
@@ -59,10 +61,19 @@ object Fixtures {
         } else {
             NestRegistry.EMPTY
         }
+        // Mirrors the task: work out what the injected utility needs before
+        // anything is rewritten, since call sites have to name it.
+        val runtimeMethods = if (api) {
+            originals.values.flatMapTo(mutableSetOf()) { ApiRewrites.runtimeMethodsNeeded(it, targetJava) }
+        } else {
+            emptySet()
+        }
+        val runtimeClassName = RuntimeApi.defaultClassName(runtimeMethods)
+
         val apiFindings = mutableListOf<String>()
         val context = DowngradeContext(
             nests = nests,
-            api = if (api) ApiSettings(targetJava, apiIndexFor(targetJava)) else null,
+            api = if (api) ApiSettings(targetJava, apiIndexFor(targetJava), runtimeClassName) else null,
             onApiFinding = { apiFindings += it }
         )
 
@@ -73,6 +84,13 @@ object Fixtures {
         nests.markerClasses.forEach { internalName ->
             downgraded[internalName] =
                 NestRegistry.markerClassBytes(internalName, ClassFileVersion.fromJavaVersion(targetJava))
+        }
+
+        if (runtimeMethods.isNotEmpty()) {
+            // Keyed the way MapClassLoader asks for it, which is the binary name.
+            // The samples themselves have no package, so only this one differs.
+            downgraded[runtimeClassName.replace('/', '.')] =
+                RuntimeApi.inject(runtimeClassName, runtimeMethods)
         }
 
         return downgraded

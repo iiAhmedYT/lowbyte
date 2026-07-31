@@ -2,13 +2,13 @@ package dev.iiahmed.lowbyte.api.rewrite
 
 import dev.iiahmed.lowbyte.api.ApiBytecode.OBJECT
 import dev.iiahmed.lowbyte.api.ApiBytecode.OPTIONAL
-import dev.iiahmed.lowbyte.api.ApiRewrite
+import dev.iiahmed.lowbyte.api.InlineRewrite
 import org.objectweb.asm.Label
 import org.objectweb.asm.MethodVisitor
 import org.objectweb.asm.Opcodes
 
 /** `Optional.isEmpty`, which is `!isPresent()` and nothing else. */
-object OptionalIsEmptyRewrite : ApiRewrite {
+object OptionalIsEmptyRewrite : InlineRewrite() {
 
     override val name = "Optional.isEmpty"
 
@@ -40,7 +40,7 @@ object OptionalIsEmptyRewrite : ApiRewrite {
  * the same method under a newer name. The `orElseThrow(Supplier)` overload is
  * Java 8 and is left alone, which the descriptor check keeps them apart on.
  */
-object OptionalOrElseThrowRewrite : ApiRewrite {
+object OptionalOrElseThrowRewrite : InlineRewrite() {
 
     override val name = "Optional.orElseThrow"
 

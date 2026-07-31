@@ -40,6 +40,23 @@ class ApiConversionTest {
     }
 
     @Test
+    fun mapOfNowGoesThroughTheInjectedUtility() {
+        requireIndex()
+
+        val downgraded = downgraded(8, api = true)
+        val injected = downgraded.keys.single { it.startsWith("dev.iiahmed.lowbyte.runtime") }
+        val calls = Fixtures.methodCallTargets(downgraded.getValue(SAMPLE))
+
+        assertTrue(
+            calls.any { it.startsWith("${injected.replace('.', '/')}.mapOf(") },
+            "Map.of should forward to the utility: $calls"
+        )
+        // Only the arities the sample used, not all eleven.
+        val kept = Fixtures.shapeOf(downgraded.getValue(injected)).methods.filter { it.startsWith("mapOf") }
+        assertTrue(kept.size in 1..4, "unused Map.of overloads were injected: $kept")
+    }
+
+    @Test
     fun theCallsAreActuallyGone() {
         requireIndex()
 

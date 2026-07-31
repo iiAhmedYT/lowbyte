@@ -83,9 +83,18 @@ Emitting something that will not run is worse than refusing to.
 An API rewrite rebuilds one JDK call out of things an older release already had. See
 [APIs.md](APIs.md) for what is there and why the list is short.
 
-1. Implement `ApiRewrite` in `api/rewrite/`, one class per API.
-2. Add it to `ApiRewrites.ALL`.
-3. Add cases to `ApiConversionSample.java.txt` and regenerate.
+1. Write it in `api/rewrite/`, one file per JDK type: `ListRewrites.kt`, `MapRewrites.kt`,
+   `StringRewrites.kt` and so on.
+2. Extend `InlineRewrite` when the replacement is a few instructions, or `RuntimeRewrite`
+   when it wants a loop, a decoder or a helper type. See below.
+3. Add it to `ApiRewrites.ALL`.
+4. Add cases to `ApiConversionSample.java.txt`, or `RuntimeApiSample.java.txt` for a
+   `RuntimeRewrite`, and regenerate.
+
+An `InlineRewrite` writes a method into the calling class. A `RuntimeRewrite` names a
+method on the injected utility and needs nothing else: owner, descriptor and release all
+come from that method's `@LowbyteInfo`, so there is nothing in Kotlin to fall out of step
+with the Java.
 
 `introducedIn` is the release the API arrived in, and it is what decides whether a call is
 rebuilt. The `ct.sym` index is not consulted, so rewrites keep working on a JDK that
@@ -99,6 +108,30 @@ the arguments below it differ per call.
 
 Test the boundary at a target *between* releases. Everything is below 9 at target 8, so
 target 8 alone cannot tell a correct release from a wrong one.
+
+## Adding a utility method
+
+For calls that cannot be rebuilt as a generated method, meaning anything wanting a loop, a
+decoder or a helper type, write it as Java in `src/runtime` instead.
+
+```java
+@LowbyteInfo(owner = "java/lang/String", name = "isBlank", descriptor = "()Z",
+    introducedIn = 11, instance = true)
+public static boolean isBlank(String value) {
+    return value.codePoints().allMatch(Character::isWhitespace);
+}
+```
+
+That source set compiles at `--release 8`, so the method has to be Java 8 code, and the
+result loads on every target Lowbyte supports. The annotation is what the plugin matches
+call sites against, so the utility describes itself and there is no second list to keep in
+step. `instance = true` means the receiver becomes the first parameter, which is already
+the order the operands sit in at the call site.
+
+Prefer an inline rewrite when the replacement is a couple of instructions, like
+`Optional.isEmpty`. The utility is for the ones that are not.
+
+Add cases to `RuntimeApiSample.java.txt`, regenerate, and run `verifyOnJava8`.
 
 ## Tasks
 
