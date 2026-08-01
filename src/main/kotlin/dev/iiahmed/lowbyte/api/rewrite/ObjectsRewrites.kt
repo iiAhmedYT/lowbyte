@@ -12,3 +12,23 @@ import dev.iiahmed.lowbyte.api.RuntimeRewrite
 object RequireNonNullElseRewrite : RuntimeRewrite("requireNonNullElse") {
     override val name = "Objects.requireNonNullElse"
 }
+
+/**
+ * `Objects.checkIndex`.
+ *
+ * More than a comparison: the message is part of what it promises, and building
+ * one is a concatenation rather than an instruction.
+ */
+object ObjectsCheckIndexRewrite : RuntimeRewrite("checkIndex") {
+    override val name = "Objects.checkIndex"
+}
+
+/** `Objects.checkFromToIndex`, the same in range form. */
+object ObjectsCheckFromToIndexRewrite : RuntimeRewrite("checkFromToIndex") {
+    override val name = "Objects.checkFromToIndex"
+}
+
+/** `Objects.checkFromIndexSize`, the same again as a start and a count. */
+object ObjectsCheckFromIndexSizeRewrite : RuntimeRewrite("checkFromIndexSize") {
+    override val name = "Objects.checkFromIndexSize"
+}

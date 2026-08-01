@@ -57,7 +57,7 @@ class RuntimeApiTest {
 
     @Test
     fun theInjectedClassIsJavaEightAndCarriesNoAnnotation() {
-        val bytes = RuntimeApi.inject("com/example/Util", setOf(ISBLANK))
+        val bytes = RuntimeApi.inject("com/example/Util", setOf(ISBLANK)).getValue("com/example/Util")
 
         assertEquals(8, dev.iiahmed.lowbyte.classfile.ClassFileVersion.toJavaVersion(Fixtures.majorVersionOf(bytes)))
         assertTrue(
@@ -71,7 +71,7 @@ class RuntimeApiTest {
         // Map.of has eleven. Asking for the two-argument one must not bring the
         // other ten along.
         val twoArguments = "mapOf(Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/Map;"
-        val methods = Fixtures.shapeOf(RuntimeApi.inject("com/example/Util", setOf(twoArguments))).methods
+        val methods = Fixtures.shapeOf(RuntimeApi.inject("com/example/Util", setOf(twoArguments)).getValue("com/example/Util")).methods
 
         assertEquals(1, methods.count { it.startsWith("mapOf") }, methods.toString())
         // ...but the private helper it calls has to come with it.
@@ -80,8 +80,8 @@ class RuntimeApiTest {
 
     @Test
     fun onlyTheWantedMethodsSurvive() {
-        val one = Fixtures.shapeOf(RuntimeApi.inject("com/example/Util", setOf(ISBLANK))).methods
-        val both = Fixtures.shapeOf(RuntimeApi.inject("com/example/Util", setOf(ISBLANK, STRIP))).methods
+        val one = Fixtures.shapeOf(RuntimeApi.inject("com/example/Util", setOf(ISBLANK)).getValue("com/example/Util")).methods
+        val both = Fixtures.shapeOf(RuntimeApi.inject("com/example/Util", setOf(ISBLANK, STRIP)).getValue("com/example/Util")).methods
 
         assertTrue(one.any { it.startsWith("isBlank") }, one.toString())
         assertTrue(one.none { it.startsWith("strip") }, "an unused method was injected: $one")
@@ -100,7 +100,7 @@ class RuntimeApiTest {
         val className = "com/example/Util"
 
         RuntimeApi.replacements.forEach { replacement ->
-            val bytes = RuntimeApi.inject(className, setOf(replacement.key))
+            val bytes = RuntimeApi.inject(className, setOf(replacement.key)).getValue(className)
             val present = Fixtures.shapeOf(bytes).methods.toSet()
             val referenced = mutableSetOf<String>()
 

@@ -6,15 +6,22 @@ import org.objectweb.asm.Handle
 import org.objectweb.asm.MethodVisitor
 import org.objectweb.asm.Opcodes
 
+import dev.iiahmed.lowbyte.api.rewrite.CollectorsToUnmodifiableListRewrite
+import dev.iiahmed.lowbyte.api.rewrite.CollectorsToUnmodifiableMapRewrite
+import dev.iiahmed.lowbyte.api.rewrite.CollectorsToUnmodifiableSetRewrite
 import dev.iiahmed.lowbyte.api.rewrite.ListCopyOfRewrite
 import dev.iiahmed.lowbyte.api.rewrite.ListOfRewrite
 import dev.iiahmed.lowbyte.api.rewrite.MapCopyOfRewrite
 import dev.iiahmed.lowbyte.api.rewrite.MapEntryRewrite
 import dev.iiahmed.lowbyte.api.rewrite.MapOfEntriesRewrite
 import dev.iiahmed.lowbyte.api.rewrite.MapOfRewrite
+import dev.iiahmed.lowbyte.api.rewrite.ObjectsCheckFromIndexSizeRewrite
+import dev.iiahmed.lowbyte.api.rewrite.ObjectsCheckFromToIndexRewrite
+import dev.iiahmed.lowbyte.api.rewrite.ObjectsCheckIndexRewrite
 import dev.iiahmed.lowbyte.api.rewrite.OptionalIsEmptyRewrite
 import dev.iiahmed.lowbyte.api.rewrite.OptionalOrElseThrowRewrite
 import dev.iiahmed.lowbyte.api.rewrite.RequireNonNullElseRewrite
+import dev.iiahmed.lowbyte.api.rewrite.PredicateNotRewrite
 import dev.iiahmed.lowbyte.api.rewrite.SetCopyOfRewrite
 import dev.iiahmed.lowbyte.api.rewrite.SetOfRewrite
 import dev.iiahmed.lowbyte.api.rewrite.StreamOfNullableRewrite
@@ -51,6 +58,10 @@ object ApiRewrites {
         OptionalIsEmptyRewrite,
         OptionalOrElseThrowRewrite,
         StreamOfNullableRewrite,
+        PredicateNotRewrite,
+        CollectorsToUnmodifiableListRewrite,
+        CollectorsToUnmodifiableSetRewrite,
+        CollectorsToUnmodifiableMapRewrite,
         StringRepeatRewrite,
         StringIsBlankRewrite,
         StringStripRewrite,
@@ -62,7 +73,10 @@ object ApiRewrites {
         StringTransformRewrite,
         StringFormattedRewrite,
         StringTranslateEscapesRewrite,
-        RequireNonNullElseRewrite
+        RequireNonNullElseRewrite,
+        ObjectsCheckIndexRewrite,
+        ObjectsCheckFromToIndexRewrite,
+        ObjectsCheckFromIndexSizeRewrite
     )
 
     /** The rewrite for a call, or null when there is none. */

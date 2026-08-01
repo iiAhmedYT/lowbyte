@@ -1,13 +1,26 @@
 package dev.iiahmed.lowbyte.runtime;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.Spliterator;
+import java.util.Spliterators;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
+import java.util.function.BinaryOperator;
 import java.util.function.Function;
+import java.util.function.Supplier;
+import java.util.stream.Collector;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 /**
  * Replacements for JDK calls that cannot be rebuilt inline.
@@ -39,7 +52,10 @@ public final class LowbyteApi {
             descriptor = "()Z", introducedIn = 11
     )
     public static boolean isBlank(String value) {
-        return value.codePoints().allMatch(Character::isWhitespace);
+        for (int i = 0, len = value.length(); i < len; i++) {
+            if (!Character.isWhitespace(value.charAt(i))) return false;
+        }
+        return true;
     }
 
     /**
@@ -105,9 +121,21 @@ public final class LowbyteApi {
     )
     public static String repeat(String value, int count) {
         if (count < 0) throw new IllegalArgumentException("count is negative: " + count);
-        StringBuilder out = new StringBuilder(value.length() * count);
-        for (int i = 0; i < count; i++) out.append(value);
-        return out.toString();
+        if (count == 1) return value;
+        int length = value.length();
+        if (length == 0 || count == 0) return "";
+        if (Integer.MAX_VALUE / count < length) {
+            throw new OutOfMemoryError("Required length exceeds implementation limit");
+        }
+        char[] out = new char[length * count];
+        value.getChars(0, length, out, 0);
+        int copied = length;
+        int total = out.length;
+        for (; copied <= total - copied; copied <<= 1) {
+            System.arraycopy(out, 0, out, copied, copied);
+        }
+        System.arraycopy(out, 0, out, copied, total - copied);
+        return new String(out);
     }
 
     /**
@@ -122,7 +150,36 @@ public final class LowbyteApi {
             descriptor = "()Ljava/util/stream/Stream;", introducedIn = 11
     )
     public static Stream<String> lines(String value) {
-        return splitLines(value).stream();
+        // Lazy, as the JDK's is, so findFirst on a large string scans one line
+        // rather than all of them. The characteristics are the ones the JDK
+        // reports too, so a downstream operation that asks makes the same
+        // decisions. The Spliterator is a nested class and travels with this one.
+        return StreamSupport.stream(new LineSpliterator(value), false);
+    }
+
+    /** One line per {@link #tryAdvance}, by the same rules {@link #splitLines} uses. */
+    private static final class LineSpliterator extends Spliterators.AbstractSpliterator<String> {
+
+        private final String value;
+        private int start;
+
+        LineSpliterator(String value) {
+            // Not SIZED: counting the lines up front is the scan being avoided.
+            super(value.length() + 1L,
+                    Spliterator.ORDERED | Spliterator.NONNULL | Spliterator.IMMUTABLE);
+            this.value = value;
+        }
+
+        @Override
+        public boolean tryAdvance(Consumer<? super String> action) {
+            int length = value.length();
+            if (start >= length) return false;
+
+            int end = lineEnd(value, start);
+            action.accept(value.substring(start, end));
+            start = end == length ? end : nextLineStart(value, end);
+            return true;
+        }
     }
 
     /**
@@ -136,15 +193,33 @@ public final class LowbyteApi {
         int length = value.length();
         int start = 0;
         while (start < length) {
-            int end = start;
-            while (end < length && value.charAt(end) != '\n' && value.charAt(end) != '\r') end++;
+            int end = lineEnd(value, start);
             lines.add(value.substring(start, end));
             if (end == length) break;
-            // CR LF is one terminator, not two.
-            boolean pair = value.charAt(end) == '\r' && end + 1 < length && value.charAt(end + 1) == '\n';
-            start = end + (pair ? 2 : 1);
+            start = nextLineStart(value, end);
         }
         return lines;
+    }
+
+    /**
+     * Where the line starting at {@code start} ends.
+     * <p>
+     * Shared with {@link #lines}, so the eager and lazy walks cannot come to
+     * different conclusions about where a line stops.
+     */
+    static int lineEnd(String value, int start) {
+        int end = start;
+        int length = value.length();
+        while (end < length && value.charAt(end) != '\n' && value.charAt(end) != '\r') end++;
+        return end;
+    }
+
+    /** Where the next line starts, given a terminator at {@code end}. */
+    static int nextLineStart(String value, int end) {
+        // CR LF is one terminator, not two.
+        boolean pair = value.charAt(end) == '\r'
+                && end + 1 < value.length() && value.charAt(end + 1) == '\n';
+        return end + (pair ? 2 : 1);
     }
 
     /**
@@ -157,8 +232,13 @@ public final class LowbyteApi {
     )
     public static String indent(String value, int n) {
         if (value.isEmpty()) return "";
-        StringBuilder out = new StringBuilder();
-        for (String line : splitLines(value)) {
+        List<String> lines = splitLines(value);
+        // Every line keeps its content and gains a line feed, plus n spaces when
+        // n is positive. A negative n only removes, so this stays an upper bound
+        // either way and the builder never grows.
+        int padding = Math.max(n, 0);
+        StringBuilder out = new StringBuilder(value.length() + lines.size() * (padding + 1));
+        for (String line : lines) {
             if (n > 0) {
                 for (int i = 0; i < n; i++) out.append(' ');
                 out.append(line);
@@ -199,7 +279,8 @@ public final class LowbyteApi {
         List<String> lines = splitLines(value);
         int outdent = optOut ? 0 : commonIndent(lines);
 
-        StringBuilder out = new StringBuilder();
+        // Only ever removes, so the input length is an upper bound.
+        StringBuilder out = new StringBuilder(length);
         for (int i = 0; i < lines.size(); i++) {
             if (i > 0) out.append('\n');
             String line = lines.get(i);
@@ -313,17 +394,376 @@ public final class LowbyteApi {
     }
 
     /**
+     * {@code Collectors.toUnmodifiableList()}.
+     * <p>
+     * Not {@code collectingAndThen(toList(), Collections::unmodifiableList)} on
+     * its own, however close that looks: {@code toList} takes a null element
+     * happily and this refuses one, so the check has to be put back.
+     */
+    @LowbyteInfo(
+            owner = "java/util/stream/Collectors", name = "toUnmodifiableList",
+            descriptor = "()Ljava/util/stream/Collector;", introducedIn = 10
+    )
+    public static <T> Collector<T, ?, List<T>> toUnmodifiableList() {
+        return Collectors.collectingAndThen(Collectors.<T>toList(), LowbyteApi::sealedList);
+    }
+
+    /** {@code Collectors.toUnmodifiableSet()}, the same trade as {@link #toUnmodifiableList}. */
+    @LowbyteInfo(
+            owner = "java/util/stream/Collectors", name = "toUnmodifiableSet",
+            descriptor = "()Ljava/util/stream/Collector;", introducedIn = 10
+    )
+    public static <T> Collector<T, ?, Set<T>> toUnmodifiableSet() {
+        return Collectors.collectingAndThen(Collectors.<T>toSet(), LowbyteApi::sealedSet);
+    }
+
+    /**
+     * {@code Collectors.toUnmodifiableMap(keyMapper, valueMapper)}.
+     * <p>
+     * Not built on {@code Collectors.toMap}. That reports a repeated key too,
+     * but on Java 8 its message names the value rather than the key
+     * (JDK-8040892, fixed in 9), and a Java 8 runtime is the whole point of this
+     * class. So the accumulator is written out to get the wording right.
+     */
+    @LowbyteInfo(owner = "java/util/stream/Collectors", name = "toUnmodifiableMap",
+            descriptor = "(Ljava/util/function/Function;Ljava/util/function/Function;)Ljava/util/stream/Collector;",
+            introducedIn = 10)
+    public static <T, K, U> Collector<T, ?, Map<K, U>> toUnmodifiableMap(
+            Function<? super T, ? extends K> keyMapper,
+            Function<? super T, ? extends U> valueMapper
+    ) {
+        Objects.requireNonNull(keyMapper, "keyMapper");
+        Objects.requireNonNull(valueMapper, "valueMapper");
+
+        Supplier<Map<K, U>> supplier = LinkedHashMap::new;
+        BiConsumer<Map<K, U>, T> accumulator = (map, element) -> {
+            K key = keyMapper.apply(element);
+            U value = Objects.requireNonNull(valueMapper.apply(element));
+            U existing = map.putIfAbsent(key, value);
+            if (existing != null) throw duplicateKey(key, existing, value);
+        };
+        BinaryOperator<Map<K, U>> combiner = (left, right) -> {
+            for (Map.Entry<K, U> entry : right.entrySet()) {
+                U existing = left.putIfAbsent(entry.getKey(), entry.getValue());
+                if (existing != null) throw duplicateKey(entry.getKey(), existing, entry.getValue());
+            }
+            return left;
+        };
+        // A null key survives putIfAbsent and is caught by the finisher, which
+        // is where the JDK catches it too.
+        Function<Map<K, U>, Map<K, U>> finisher = LowbyteApi::sealedMap;
+        return Collector.of(supplier, accumulator, combiner, finisher);
+    }
+
+    private static IllegalStateException duplicateKey(Object key, Object existing, Object added) {
+        return new IllegalStateException(
+                "Duplicate key " + key + " (attempted merging values " + existing + " and " + added + ")");
+    }
+
+    /** {@code Collectors.toUnmodifiableMap} with a merge function, which is where a repeated key stops being an error. */
+    @LowbyteInfo(
+            owner = "java/util/stream/Collectors", name = "toUnmodifiableMap", introducedIn = 10,
+            descriptor = "(Ljava/util/function/Function;Ljava/util/function/Function;Ljava/util/function/BinaryOperator;)Ljava/util/stream/Collector;"
+    )
+    public static <T, K, U> Collector<T, ?, Map<K, U>> toUnmodifiableMap(
+            Function<? super T, ? extends K> keyMapper,
+            Function<? super T, ? extends U> valueMapper,
+            BinaryOperator<U> mergeFunction) {
+        // Refused when the collector is built rather than when it is used, and
+        // named, which is where and how the JDK refuses them too.
+        Objects.requireNonNull(keyMapper, "keyMapper");
+        Objects.requireNonNull(valueMapper, "valueMapper");
+        Objects.requireNonNull(mergeFunction, "mergeFunction");
+        Collector<T, ?, Map<K, U>> collected = Collectors.toMap(keyMapper, valueMapper, mergeFunction);
+        return Collectors.collectingAndThen(collected, LowbyteApi::sealedMap);
+    }
+
+    /**
+     * Refuses nulls once at the end rather than wrapping every element.
+     * <p>
+     * A finisher runs on the finished collection, so this costs one pass instead
+     * of an extra function call per element on the way in. What it refuses is the
+     * same either way.
+     */
+    private static <T> List<T> sealedList(List<T> values) {
+        for (T value : values) Objects.requireNonNull(value);
+        return Collections.unmodifiableList(values);
+    }
+
+    private static <T> Set<T> sealedSet(Set<T> values) {
+        for (T value : values) Objects.requireNonNull(value);
+        return Collections.unmodifiableSet(values);
+    }
+
+    private static <K, V> Map<K, V> sealedMap(Map<K, V> values) {
+        for (Map.Entry<K, V> entry : values.entrySet()) {
+            Objects.requireNonNull(entry.getKey());
+            Objects.requireNonNull(entry.getValue());
+        }
+        return Collections.unmodifiableMap(values);
+    }
+
+    /**
+     * {@code Objects.checkIndex}.
+     * <p>
+     * Returns the index it was given, so it reads as part of an expression. The
+     * message is the JDK's own wording, since a caller matching on it is matching
+     * on something the JDK documents by example.
+     */
+    @LowbyteInfo(owner = "java/util/Objects", name = "checkIndex", descriptor = "(II)I", introducedIn = 9)
+    public static int checkIndex(int index, int length) {
+        if (index < 0 || index >= length) {
+            throw new IndexOutOfBoundsException("Index " + index + " out of bounds for length " + length);
+        }
+        return index;
+    }
+
+    /** {@code Objects.checkFromToIndex}, a half-open range, so {@code to} may equal {@code length}. */
+    @LowbyteInfo(owner = "java/util/Objects", name = "checkFromToIndex", descriptor = "(III)I", introducedIn = 9)
+    public static int checkFromToIndex(int fromIndex, int toIndex, int length) {
+        if (fromIndex < 0 || fromIndex > toIndex || toIndex > length) {
+            throw new IndexOutOfBoundsException(
+                    "Range [" + fromIndex + ", " + toIndex + ") out of bounds for length " + length);
+        }
+        return fromIndex;
+    }
+
+    /** {@code Objects.checkFromIndexSize}, the same range given as a start and a count. */
+    @LowbyteInfo(owner = "java/util/Objects", name = "checkFromIndexSize", descriptor = "(III)I", introducedIn = 9)
+    public static int checkFromIndexSize(int fromIndex, int size, int length) {
+        // One test for all three being non-negative, and then a comparison that
+        // cannot overflow the way fromIndex + size can. Both are how the JDK
+        // writes it, and the overflow one is not a detail worth rediscovering.
+        if ((length | fromIndex | size) < 0 || size > length - fromIndex) {
+            throw new IndexOutOfBoundsException(
+                    "Range [" + fromIndex + ", " + fromIndex + " + " + size
+                            + ") out of bounds for length " + length);
+        }
+        return fromIndex;
+    }
+
+    /**
      * {@code Objects.requireNonNullElse}.
      * <p>
      * The default is null-checked too, under the same parameter name the JDK
      * uses in its message, so both being null reads the same either way.
      */
     @LowbyteInfo(
-            owner = "java/util/Objects", name = "requireNonNullElse", descriptor = "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;",
-            introducedIn = 9
+            owner = "java/util/Objects", name = "requireNonNullElse", introducedIn = 9,
+            descriptor = "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
     )
     public static <T> T requireNonNullElse(T value, T defaultValue) {
         return value != null ? value : Objects.requireNonNull(defaultValue, "defaultObj");
+    }
+
+    /**
+     * {@code List.of}, one overload per arity as the JDK has them.
+     * <p>
+     * Nulls are refused, exactly as the factory does. An unmodifiable view over
+     * an {@code ArrayList} nobody else holds is observably the same thing: it
+     * refuses mutation, keeps its order, and equals an equivalent list.
+     */
+    @LowbyteInfo(owner = "java/util/List", name = "of", descriptor = "()Ljava/util/List;", introducedIn = 9)
+    public static <E> List<E> listOf() {
+        return newList();
+    }
+
+    @LowbyteInfo(owner = "java/util/List", name = "of", descriptor = "(Ljava/lang/Object;)Ljava/util/List;", introducedIn = 9)
+    public static <E> List<E> listOf(E e1) {
+        return newList(e1);
+    }
+
+    @LowbyteInfo(owner = "java/util/List", name = "of", descriptor = "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/List;", introducedIn = 9)
+    public static <E> List<E> listOf(E e1, E e2) {
+        return newList(e1, e2);
+    }
+
+    @LowbyteInfo(owner = "java/util/List", name = "of", descriptor = "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/List;", introducedIn = 9)
+    public static <E> List<E> listOf(E e1, E e2, E e3) {
+        return newList(e1, e2, e3);
+    }
+
+    @LowbyteInfo(owner = "java/util/List", name = "of", descriptor = "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/List;", introducedIn = 9)
+    public static <E> List<E> listOf(E e1, E e2, E e3, E e4) {
+        return newList(e1, e2, e3, e4);
+    }
+
+    @LowbyteInfo(owner = "java/util/List", name = "of", descriptor = "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/List;", introducedIn = 9)
+    public static <E> List<E> listOf(E e1, E e2, E e3, E e4, E e5) {
+        return newList(e1, e2, e3, e4, e5);
+    }
+
+    @LowbyteInfo(owner = "java/util/List", name = "of", descriptor = "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/List;", introducedIn = 9)
+    public static <E> List<E> listOf(E e1, E e2, E e3, E e4, E e5, E e6) {
+        return newList(e1, e2, e3, e4, e5, e6);
+    }
+
+    @LowbyteInfo(owner = "java/util/List", name = "of", descriptor = "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/List;", introducedIn = 9)
+    public static <E> List<E> listOf(E e1, E e2, E e3, E e4, E e5, E e6, E e7) {
+        return newList(e1, e2, e3, e4, e5, e6, e7);
+    }
+
+    @LowbyteInfo(owner = "java/util/List", name = "of", descriptor = "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/List;", introducedIn = 9)
+    public static <E> List<E> listOf(E e1, E e2, E e3, E e4, E e5, E e6, E e7, E e8) {
+        return newList(e1, e2, e3, e4, e5, e6, e7, e8);
+    }
+
+    @LowbyteInfo(owner = "java/util/List", name = "of", descriptor = "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/List;", introducedIn = 9)
+    public static <E> List<E> listOf(E e1, E e2, E e3, E e4, E e5, E e6, E e7, E e8, E e9) {
+        return newList(e1, e2, e3, e4, e5, e6, e7, e8, e9);
+    }
+
+    @LowbyteInfo(owner = "java/util/List", name = "of", descriptor = "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/List;", introducedIn = 9)
+    public static <E> List<E> listOf(E e1, E e2, E e3, E e4, E e5, E e6, E e7, E e8, E e9, E e10) {
+        return newList(e1, e2, e3, e4, e5, e6, e7, e8, e9, e10);
+    }
+
+    /** Past ten elements javac calls the varargs overload, which arrives as one array. */
+    @LowbyteInfo(owner = "java/util/List", name = "of", descriptor = "([Ljava/lang/Object;)Ljava/util/List;", introducedIn = 9)
+    public static <E> List<E> listOf(E[] values) {
+        return newList((Object[]) values);
+    }
+
+    /**
+     * {@code Set.of}, which on top of refusing nulls refuses a repeated element.
+     * <p>
+     * Iteration order is documented as unspecified and the JDK randomises it per
+     * run. Insertion order stays inside that contract and simply does not shuffle.
+     */
+    @LowbyteInfo(owner = "java/util/Set", name = "of", descriptor = "()Ljava/util/Set;", introducedIn = 9)
+    public static <E> Set<E> setOf() {
+        return newSet();
+    }
+
+    @LowbyteInfo(owner = "java/util/Set", name = "of", descriptor = "(Ljava/lang/Object;)Ljava/util/Set;", introducedIn = 9)
+    public static <E> Set<E> setOf(E e1) {
+        return newSet(e1);
+    }
+
+    @LowbyteInfo(owner = "java/util/Set", name = "of", descriptor = "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/Set;", introducedIn = 9)
+    public static <E> Set<E> setOf(E e1, E e2) {
+        return newSet(e1, e2);
+    }
+
+    @LowbyteInfo(owner = "java/util/Set", name = "of", descriptor = "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/Set;", introducedIn = 9)
+    public static <E> Set<E> setOf(E e1, E e2, E e3) {
+        return newSet(e1, e2, e3);
+    }
+
+    @LowbyteInfo(owner = "java/util/Set", name = "of", descriptor = "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/Set;", introducedIn = 9)
+    public static <E> Set<E> setOf(E e1, E e2, E e3, E e4) {
+        return newSet(e1, e2, e3, e4);
+    }
+
+    @LowbyteInfo(owner = "java/util/Set", name = "of", descriptor = "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/Set;", introducedIn = 9)
+    public static <E> Set<E> setOf(E e1, E e2, E e3, E e4, E e5) {
+        return newSet(e1, e2, e3, e4, e5);
+    }
+
+    @LowbyteInfo(owner = "java/util/Set", name = "of", descriptor = "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/Set;", introducedIn = 9)
+    public static <E> Set<E> setOf(E e1, E e2, E e3, E e4, E e5, E e6) {
+        return newSet(e1, e2, e3, e4, e5, e6);
+    }
+
+    @LowbyteInfo(owner = "java/util/Set", name = "of", descriptor = "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/Set;", introducedIn = 9)
+    public static <E> Set<E> setOf(E e1, E e2, E e3, E e4, E e5, E e6, E e7) {
+        return newSet(e1, e2, e3, e4, e5, e6, e7);
+    }
+
+    @LowbyteInfo(owner = "java/util/Set", name = "of", descriptor = "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/Set;", introducedIn = 9)
+    public static <E> Set<E> setOf(E e1, E e2, E e3, E e4, E e5, E e6, E e7, E e8) {
+        return newSet(e1, e2, e3, e4, e5, e6, e7, e8);
+    }
+
+    @LowbyteInfo(owner = "java/util/Set", name = "of", descriptor = "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/Set;", introducedIn = 9)
+    public static <E> Set<E> setOf(E e1, E e2, E e3, E e4, E e5, E e6, E e7, E e8, E e9) {
+        return newSet(e1, e2, e3, e4, e5, e6, e7, e8, e9);
+    }
+
+    @LowbyteInfo(owner = "java/util/Set", name = "of", descriptor = "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/Set;", introducedIn = 9)
+    public static <E> Set<E> setOf(E e1, E e2, E e3, E e4, E e5, E e6, E e7, E e8, E e9, E e10) {
+        return newSet(e1, e2, e3, e4, e5, e6, e7, e8, e9, e10);
+    }
+
+    /** Past ten elements javac calls the varargs overload, which arrives as one array. */
+    @LowbyteInfo(owner = "java/util/Set", name = "of", descriptor = "([Ljava/lang/Object;)Ljava/util/Set;", introducedIn = 9)
+    public static <E> Set<E> setOf(E[] values) {
+        return newSet((Object[]) values);
+    }
+
+    /** {@code List.copyOf}, a snapshot refusing a null collection and null elements. */
+    @LowbyteInfo(owner = "java/util/List", name = "copyOf",
+            descriptor = "(Ljava/util/Collection;)Ljava/util/List;", introducedIn = 10)
+    public static <E> List<E> listCopyOf(Collection<? extends E> source) {
+        // toArray is contractually a fresh array, but copyOf takes any
+        // Collection and one that ignores that clause hands back an array it
+        // still holds. Then the null check does not stick: the source mutates a
+        // slot afterwards and the "immutable" list has a null in it. The JDK
+        // copies for the same reason, its comment naming the race as TOCTOU.
+        //
+        // A bulk copy rather than a walk into an ArrayList, which is the same
+        // guarantee at roughly half the cost.
+        Object[] values = Objects.requireNonNull(source).toArray();
+        values = Arrays.copyOf(values, values.length);
+        for (Object value : values) Objects.requireNonNull(value);
+
+        @SuppressWarnings("unchecked")
+        List<E> result = (List<E>) Collections.unmodifiableList(Arrays.asList(values));
+        return result;
+    }
+
+    /**
+     * {@code Set.copyOf}, which is not {@code Set.of} twice over.
+     * <p>
+     * {@code Set.of} refuses a repeated element. {@code copyOf} keeps one of
+     * them and says so: "if the given Collection contains duplicate elements, an
+     * arbitrary element of the duplicates is preserved". Keeping the first is
+     * inside that, so there is deliberately no duplicate check here.
+     */
+    @LowbyteInfo(owner = "java/util/Set", name = "copyOf",
+            descriptor = "(Ljava/util/Collection;)Ljava/util/Set;", introducedIn = 10)
+    public static <E> Set<E> setCopyOf(Collection<? extends E> source) {
+        LinkedHashSet<Object> set = new LinkedHashSet<>(capacity(Objects.requireNonNull(source).size()));
+        for (Object value : source) set.add(Objects.requireNonNull(value));
+        return unmodifiableSet(set);
+    }
+
+    /** Shared by every {@code listOf} arity. */
+    private static <E> List<E> newList(Object... values) {
+        ArrayList<Object> list = new ArrayList<>(values.length);
+        for (Object value : values) list.add(Objects.requireNonNull(value));
+        @SuppressWarnings("unchecked")
+        List<E> result = (List<E>) Collections.unmodifiableList(list);
+        return result;
+    }
+
+    /** Shared by every {@code setOf} arity, duplicate check and all. */
+    private static <E> Set<E> newSet(Object... values) {
+        LinkedHashSet<Object> set = new LinkedHashSet<>(capacity(values.length));
+        for (Object value : values) {
+            if (!set.add(Objects.requireNonNull(value))) {
+                throw new IllegalArgumentException("duplicate element: " + value);
+            }
+        }
+        return unmodifiableSet(set);
+    }
+
+    /**
+     * The table size that holds {@code size} entries without rehashing.
+     * <p>
+     * A hash table resizes once it is three quarters full, so asking for exactly
+     * the count still rehashes on the way. This is what the JDK's own
+     * {@code HashMap.newHashMap} computes, spelled out because that arrived in 19.
+     */
+    private static int capacity(int size) {
+        return (int) (size / 0.75f) + 1;
+    }
+
+    /** The one cast, in the one place. */
+    private static <E> Set<E> unmodifiableSet(LinkedHashSet<Object> set) {
+        @SuppressWarnings("unchecked")
+        Set<E> result = (Set<E>) Collections.unmodifiableSet(set);
+        return result;
     }
 
     /**
@@ -399,7 +839,7 @@ public final class LowbyteApi {
             descriptor = "([Ljava/util/Map$Entry;)Ljava/util/Map;", introducedIn = 9
     )
     public static <K, V> Map<K, V> ofEntries(Map.Entry<? extends K, ? extends V>[] entries) {
-        LinkedHashMap<Object, Object> map = new LinkedHashMap<>();
+        LinkedHashMap<Object, Object> map = new LinkedHashMap<>(capacity(Objects.requireNonNull(entries).length));
         for (Map.Entry<? extends K, ? extends V> entry : Objects.requireNonNull(entries)) {
             Objects.requireNonNull(entry);
             Object key = Objects.requireNonNull(entry.getKey());
@@ -422,8 +862,9 @@ public final class LowbyteApi {
             descriptor = "(Ljava/util/Map;)Ljava/util/Map;", introducedIn = 10
     )
     public static <K, V> Map<K, V> copyOf(Map<? extends K, ? extends V> source) {
-        LinkedHashMap<Object, Object> map = new LinkedHashMap<>();
-        for (Map.Entry<?, ?> entry : Objects.requireNonNull(source).entrySet()) {
+        LinkedHashMap<Object, Object> map =
+                new LinkedHashMap<>(capacity(Objects.requireNonNull(source).size()));
+        for (Map.Entry<?, ?> entry : source.entrySet()) {
             map.put(Objects.requireNonNull(entry.getKey()), Objects.requireNonNull(entry.getValue()));
         }
         return unmodifiable(map);
@@ -431,7 +872,7 @@ public final class LowbyteApi {
 
     /** Shared by every {@code mapOf} arity. */
     private static <K, V> Map<K, V> newMap(Object... keysAndValues) {
-        LinkedHashMap<Object, Object> map = new LinkedHashMap<>();
+        LinkedHashMap<Object, Object> map = new LinkedHashMap<>(capacity(keysAndValues.length / 2));
         for (int i = 0; i < keysAndValues.length; i += 2) {
             Object key = Objects.requireNonNull(keysAndValues[i]);
             Object value = Objects.requireNonNull(keysAndValues[i + 1]);

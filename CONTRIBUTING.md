@@ -95,8 +95,9 @@ release all come from its `@LowbyteInfo`, so no Kotlin can fall out of step with
   `ct.sym` both ways.
 - Only rewrite where the observable contract matches. If the older equivalent differs on
   nulls, duplicates, mutability, ordering or exceptions, leave it to be reported.
-- `ApiSlots` computes where locals go. Never hardcode a slot; the arguments below it differ
-  per call.
+- If an inline rewrite needs a scratch local, work its slot out from the descriptor rather
+  than hardcoding one. The arguments below it differ per call, so a fixed slot works until
+  the first rewrite with a different signature overwrites an argument with it.
 - Test the boundary at a target *between* releases. Everything is below 9 at target 8, so
   target 8 alone cannot tell a correct release from a wrong one.
 

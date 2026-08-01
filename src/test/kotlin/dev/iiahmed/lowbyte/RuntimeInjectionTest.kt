@@ -32,7 +32,8 @@ class RuntimeInjectionTest {
     @Test
     fun theCallsPointAtTheInjectedClass() {
         val downgraded = Fixtures.downgrade(SAMPLE, targetJava = 8, api = true)
-        val injected = downgraded.keys.single { it.startsWith(PACKAGE) }
+        // The utility itself, not the helper types nested inside it.
+        val injected = downgraded.keys.single { it.startsWith(PACKAGE) && '$' !in it }
         val calls = Fixtures.methodCallTargets(downgraded.getValue(SAMPLE))
 
         assertTrue(calls.none { it.startsWith("java/lang/String.isBlank(") }, "isBlank survived")
@@ -60,7 +61,8 @@ class RuntimeInjectionTest {
     @Test
     fun onlyTheUsedMethodsAreInjected() {
         val downgraded = Fixtures.downgrade(SAMPLE, targetJava = 8, api = true)
-        val injected = downgraded.keys.single { it.startsWith(PACKAGE) }
+        // The utility itself, not the helper types nested inside it.
+        val injected = downgraded.keys.single { it.startsWith(PACKAGE) && '$' !in it }
         val methods = Fixtures.shapeOf(downgraded.getValue(injected)).methods
 
         // What the sample calls, plus the private helpers those reach. The
@@ -81,6 +83,11 @@ class RuntimeInjectionTest {
                 "firstNonWhitespace(Ljava/lang/String;)I",
                 "lastNonWhitespace(Ljava/lang/String;)I",
                 "splitLines(Ljava/lang/String;)Ljava/util/List;",
+                // Package-private rather than private on purpose: the nested
+                // LineSpliterator calls them, and a private one would make javac
+                // add an access$NNN bridge to reach it.
+                "lineEnd(Ljava/lang/String;I)I",
+                "nextLineStart(Ljava/lang/String;I)I",
                 "commonIndent(Ljava/util/List;)I"
             ).sorted(),
             methods.sorted()

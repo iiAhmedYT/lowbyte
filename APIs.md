@@ -31,24 +31,22 @@ the same class, with nothing added to the jar; the ones that need more than that
 | Call                         | Since | Rebuilt as                                                        |
 |------------------------------|-------|-------------------------------------------------------------------|
 | `Optional.isEmpty`           | 11    | `!isPresent()`                                                    |
+| `Predicate.not`              | 11    | `negate()`, which is its own body and a Java 8 default method     |
 | `Stream.ofNullable`          | 9     | `t == null ? Stream.empty() : Stream.of(t)`, its own body         |
 | `Optional.orElseThrow()`     | 10    | `get()`, which throws the same exception and message              |
-| `List.copyOf`, `Set.copyOf`  | 10    | a snapshot, nulls rejected                                        |
-| `List.of`, every arity       | 9     | an unmodifiable `ArrayList`, nulls rejected                       |
-| `Set.of`, every arity        | 9     | an unmodifiable `LinkedHashSet`, nulls and duplicates rejected    |
 | `Map.entry`                  | 9     | `AbstractMap.SimpleImmutableEntry`, nulls rejected                |
 
 ### Details worth knowing
 
-**Every arity.** Past ten elements `List.of` and `Set.of` have no fixed-arity overload
-left, so javac calls the varargs one, `of(E[])`. That form is rebuilt too. `Map.of` has no
-varargs form at all, capping at ten pairs and making you write `Map.ofEntries` beyond that,
-which is handled on the utility.
+**The collection factories are all on the utility.** Every one of them walks its elements
+checking for null, and `Set.of` and `Map.of` check for a repeat on top of that. That is a
+loop, and a loop is worth writing as Java. `Map.entry` is the exception that stays inline,
+being one allocation and two null checks.
 
-**Every `Map` factory is on the utility.** `Map.of` has eleven overloads, one per arity up
-to ten pairs, and each wants two null checks per pair plus a repeated-key check across the
-lot. `ofEntries` and `copyOf` want the same walk. All of it is loops, so all of it is
-written as Java. `Map.entry` is the exception and stays inline, being one allocation.
+**Every arity.** `List.of` and `Set.of` have eleven fixed-arity overloads each, plus the
+varargs `of(E[])` javac calls past ten elements. Each is a separate descriptor and so a
+separate entry on the utility, and all twelve are covered. `Map.of` has no varargs form at
+all, capping at ten pairs and making you write `Map.ofEntries` beyond that.
 
 **`copyOf` is not `of` twice over.** `Set.of` refuses a repeated element with an
 `IllegalArgumentException`. `Set.copyOf` quietly keeps one of them, as its javadoc says it
@@ -72,23 +70,46 @@ So those live in a small utility class, written as ordinary Java in `src/runtime
 at `--release 8`, and carried inside the plugin. When a jar calls one of them, the class is
 copied into that jar and the call site is pointed at it.
 
-| Call                         | Since | Why it is here rather than inline                                    |
-|------------------------------|-------|----------------------------------------------------------------------|
-| `String.isBlank`             | 11    | `Character.isWhitespace` over code points                            |
-| `String.strip`               | 11    | the same, from both ends                                             |
-| `String.stripLeading`        | 11    | the front half of it                                                 |
-| `String.stripTrailing`       | 11    | the back half                                                        |
-| `String.repeat`              | 11    | a counted loop, negative counts rejected                             |
-| `String.lines`               | 11    | LF, CR and CRLF, with a trailing terminator adding no line           |
-| `String.indent`              | 12    | a walk over lines, re-terminating each one                           |
-| `String.stripIndent`         | 13    | the common indent, then a second pass to remove it                   |
-| `String.transform`           | 12    | nothing complicated, but the receiver has to move to a parameter     |
-| `String.formatted`           | 13    | `String.format` with the receiver as the format                      |
-| `String.translateEscapes`    | 13    | a decoder, octal escapes and line continuations included             |
-| `Objects.requireNonNullElse` | 9     | the fallback is null-checked too, under the JDK's own parameter name |
-| `Map.of`                     | 9     | eleven overloads, two null checks a pair, one key check              |
-| `Map.ofEntries`              | 9     | the same walk, over an array of entries                              |
-| `Map.copyOf`                 | 10    | the same walk again, with no duplicate to refuse                     |
+| Call                            | Since | Why it is here rather than inline                                       |
+|---------------------------------|-------|-------------------------------------------------------------------------|
+| `String.isBlank`                | 11    | `Character.isWhitespace` over code points                               |
+| `String.strip`                  | 11    | the same, from both ends                                                |
+| `String.stripLeading`           | 11    | the front half of it                                                    |
+| `String.stripTrailing`          | 11    | the back half                                                           |
+| `String.repeat`                 | 11    | a counted loop, negative counts rejected                                |
+| `String.lines`                  | 11    | LF, CR and CRLF, with a trailing terminator adding no line              |
+| `String.indent`                 | 12    | a walk over lines, re-terminating each one                              |
+| `String.stripIndent`            | 13    | the common indent, then a second pass to remove it                      |
+| `String.transform`              | 12    | nothing complicated, but the receiver has to move to a parameter        |
+| `String.formatted`              | 13    | `String.format` with the receiver as the format                         |
+| `String.translateEscapes`       | 13    | a decoder, octal escapes and line continuations included                |
+| `Objects.requireNonNullElse`    | 9     | the fallback is null-checked too, under the JDK's own parameter name    |
+| `Objects.checkIndex`            | 9     | the message is part of the promise, and building one is a concatenation |
+| `Objects.checkFromToIndex`      | 9     | the same, as a half-open range                                          |
+| `Objects.checkFromIndexSize`    | 9     | the same, and a comparison written so it cannot overflow                |
+| `List.of`, every arity          | 9     | twelve overloads, a null check per element                              |
+| `Set.of`, every arity           | 9     | the same, plus a repeated element refused                               |
+| `List.copyOf`                   | 10    | a snapshot, null collection and null elements refused                   |
+| `Set.copyOf`                    | 10    | the same, but a repeat is kept rather than refused                      |
+| `Map.of`                        | 9     | eleven overloads, two null checks a pair, one key check                 |
+| `Map.ofEntries`                 | 9     | the same walk, over an array of entries                                 |
+| `Map.copyOf`                    | 10    | the same walk again, with no duplicate to refuse                        |
+| `Collectors.toUnmodifiableList` | 10    | a `Collector`, and the Java 8 one underneath accepts nulls              |
+| `Collectors.toUnmodifiableSet`  | 10    | the same                                                                |
+| `Collectors.toUnmodifiableMap`  | 10    | the same, both overloads                                                |
+
+**The bounds checks return their index**, so they read inside an expression rather than
+above one, and all three throw `IndexOutOfBoundsException`. Only the message tells them
+apart, so the messages are reproduced exactly. `checkFromIndexSize` compares against
+`length - fromIndex` rather than summing, because `fromIndex + size` overflows and a naive
+sum silently accepts a range that runs off the end. The `long` overloads are Java 16 and
+are reported rather than rewritten.
+
+**The `toUnmodifiable` collectors are not `collectingAndThen`.** The obvious swap,
+`collectingAndThen(toSet(), Collections::unmodifiableSet)`, is wrong: `toSet`, `toList` and
+`toMap` all take a null happily and the Java 10 collectors refuse one. A naive rewrite
+would put nulls into collections documented to reject them. The replacements add the check
+back, once in the finisher rather than per element.
 
 `String.stripIndent`, `formatted` and `translateEscapes` had an unusual run: deprecated for
 removal in 13, behind preview in 14, settled in 15. Thirteen is the lowest release where
@@ -97,6 +118,24 @@ they exist at all, so that is where replacing them stops.
 Text blocks do not produce calls to any of these. javac strips a text block's indentation
 and translates its escapes at compile time, so it reaches the class file as an ordinary
 string constant. Only an explicit call is left to rewrite.
+
+### Where the rebuilds are not bit-identical
+
+Inside the contract, but worth knowing if you are transforming a jar whose callers might
+lean on the difference.
+
+**Probing with null.** `List.of("a").contains(null)` throws `NullPointerException` on a real
+Java 9+. The rebuild returns `false`, because it is a `Collections.unmodifiable*` view over
+an ordinary collection. The same goes for `indexOf`, `containsKey` and `containsValue`. Both
+are legal: `Collection.contains` documents that `NullPointerException` is optional. Code
+that probes an immutable collection with null was relying on the optional half.
+
+**`String.lines` is eager.** It builds the list and streams it, where the JDK's is lazy.
+Same elements in the same order, different memory profile on a very large string.
+
+**Identity and serialized form.** `List.copyOf` of an already-immutable list returns a fresh
+copy rather than the same instance, which the spec permits, and the serialized form of every
+rebuilt collection is the wrapper's rather than the JDK's.
 
 What you get:
 

@@ -213,12 +213,17 @@ abstract class DowngradeBytecode @Inject constructor() : DefaultTask() {
         if (settings == null || methods.isEmpty()) return 0
 
         val name = settings.runtimeClassName
-        jos.putNextEntry(ZipEntry("$name.class"))
-        jos.write(RuntimeApi.inject(name, methods))
-        jos.closeEntry()
+        // More than one class when a kept method needs a helper type, since a
+        // nested class is a class file of its own.
+        val injected = RuntimeApi.inject(name, methods)
+        injected.forEach { (className, bytes) ->
+            jos.putNextEntry(ZipEntry("$className.class"))
+            jos.write(bytes)
+            jos.closeEntry()
+        }
 
         logger.lifecycle("Injected $name with ${methods.size} method(s): ${methods.sorted().joinToString(", ")}")
-        return 1
+        return injected.size
     }
 
     private fun apiSettings(target: Int, runtimeMethods: Set<String>): ApiSettings? {

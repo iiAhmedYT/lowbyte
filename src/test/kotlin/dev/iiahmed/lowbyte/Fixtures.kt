@@ -108,9 +108,12 @@ object Fixtures {
 
         if (runtimeMethods.isNotEmpty()) {
             // Keyed the way MapClassLoader asks for it, which is the binary name.
-            // The samples themselves have no package, so only this one differs.
-            downgraded[runtimeClassName.replace('/', '.')] =
-                RuntimeApi.inject(runtimeClassName, runtimeMethods)
+            // The samples themselves have no package, so only these differ. More
+            // than one when a kept method needs a helper type, which is a nested
+            // class and so a class file of its own.
+            RuntimeApi.inject(runtimeClassName, runtimeMethods).forEach { (name, bytes) ->
+                downgraded[name.replace('/', '.')] = bytes
+            }
         }
 
         return downgraded

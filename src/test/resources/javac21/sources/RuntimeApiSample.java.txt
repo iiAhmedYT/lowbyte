@@ -84,8 +84,9 @@ public class RuntimeApiSample {
         // Not rewritten, and deliberately checked anyway: String only declared
         // these in 9, so a 21 build calls String.chars, but CharSequence has had
         // them as default methods since 8 and that is where the call resolves.
-        out.add("chars=" + " a ".chars().sum());
-        out.add("codePoints=" + " a ".codePoints().sum());
+
+        out.add("chars=" + " a\u2028".chars().sum());
+        out.add("codePoints=" + " a\u2028".codePoints().sum());
 
         // A method reference names the JDK method in an invokedynamic bootstrap
         // argument, not in a call instruction.
