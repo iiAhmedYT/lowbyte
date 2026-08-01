@@ -442,6 +442,10 @@ public class ApiConversionSample {
             out.add("reader.transferToEmpty=" + ((Reader) new StringReader("")).transferTo(new StringWriter()));
             out.add("reader.transferToNull=" + attemptIo(() ->
                 ((Reader) new StringReader("x")).transferTo(null)));
+            // An empty reader never enters the loop, so this is the only case
+            // that reaches the argument check rather than the first write.
+            out.add("reader.transferToNullEmpty=" + attemptIo(() ->
+                ((Reader) new StringReader("")).transferTo(null)));
 
             // One char per read, so the loop has to run rather than a single
             // read appearing to be enough.

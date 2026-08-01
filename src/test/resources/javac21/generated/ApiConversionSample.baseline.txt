@@ -145,5 +145,6 @@ files.mismatchAcrossBlocks=15000
 reader.transferTo=5[hello]
 reader.transferToEmpty=0
 reader.transferToNull=NullPointerException
+reader.transferToNullEmpty=NullPointerException
 reader.transferToDripping=5[hello]
 reader.transferToLarge=20000

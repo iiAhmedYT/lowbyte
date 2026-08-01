@@ -169,8 +169,24 @@ r.transferTo(w);             // rewritten, and the override does not run
 Only that shape. javac writes the declared type as the owner, so `MyReader r` or
 `BufferedReader r` are not matched at all and are reported instead.
 
-**`String.lines` is eager.** It builds the list and streams it, where the JDK's is lazy.
-Same elements in the same order, different memory profile on a very large string.
+**U+180E is whitespace on Java 8 and not on Java 9 onwards.** Unicode 6.3 reclassified
+MONGOLIAN VOWEL SEPARATOR from a space separator to a format character, and Java 8 predates
+that. Every replacement here goes through `Character.isWhitespace`, so at target 8
+`isBlank`, `strip`, `stripLeading`, `stripTrailing`, `indent` and `stripIndent` all treat
+that one character as whitespace where the original did not. A sweep of all 1,114,112 code
+points says it is the only disagreement between the two, and targets 9 and above already
+have the newer data.
+
+This is the target JVM's Unicode table, not a rewrite getting it wrong:
+`Character.isWhitespace(0x180E)` is already `true` on Java 8 and `false` on Java 9,
+whatever Lowbyte does. It is recorded because a downgraded jar behaving differently from the
+original is the one thing this project exists to prevent, and `verifyOnJava8` does catch it
+if a sample ever contains that character.
+
+**`String.lines` is lazy**, as the JDK's is, and reports the same
+`ORDERED | NONNULL | IMMUTABLE`. It carries a nested `Spliterator` class, injected alongside
+the utility, which is why `findFirst` on a large string scans one line rather than all of
+them.
 
 **Identity and serialized form.** `List.copyOf` of an already-immutable list returns a fresh
 copy rather than the same instance, which the spec permits, and the serialized form of every

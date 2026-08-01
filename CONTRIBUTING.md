@@ -95,10 +95,15 @@ release all come from its `@LowbyteInfo`, so no Kotlin can fall out of step with
   `ct.sym` both ways.
 - Only rewrite where the observable contract matches. If the older equivalent differs on
   nulls, duplicates, mutability, ordering or exceptions, leave it to be reported.
-- **Never rewrite an overridable instance method.** Forwarding to the utility is a static
-  call, so any override is bypassed. Safe targets are static methods, methods on final
-  classes, and rewrites that emit a call to an older method so dispatch is preserved.
-  `InputStream.readAllBytes` looked fine and was not: `ByteArrayInputStream` overrides it.
+- **Count how many implementations the JDK ships.** A rewrite supplies exactly one, so a
+  method that subclasses specialise cannot be rebuilt faithfully. `ByteArrayInputStream` and
+  `FileInputStream` specialise `InputStream.readAllBytes` and `readNBytes`, and one generic
+  replacement returns 5 where a real Java 21 returns 1, so those are reported instead.
+  `Reader.transferTo` is declared once and inherited everywhere, so one replacement is all
+  of it. Static methods and final classes are free of this by construction.
+- **A rewrite also costs the caller their own override**, since it becomes a static call.
+  Only where the receiver is declared as the base type: javac writes the declared type as
+  the owner, so `MyReader r` is not matched at all. Worth a line in APIs.md when it applies.
 - If an inline rewrite needs a scratch local, work its slot out from the descriptor rather
   than hardcoding one. The arguments below it differ per call, so a fixed slot works until
   the first rewrite with a different signature overwrites an argument with it.
