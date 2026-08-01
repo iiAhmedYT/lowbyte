@@ -1,13 +1,13 @@
 package dev.iiahmed.lowbyte.transform
 
 import dev.iiahmed.lowbyte.api.ApiCallSite
-import dev.iiahmed.lowbyte.api.ApiRewrite
 import dev.iiahmed.lowbyte.api.ApiRewrites
 import dev.iiahmed.lowbyte.api.ApiSettings
 import dev.iiahmed.lowbyte.api.InlineRewrite
 import dev.iiahmed.lowbyte.api.RuntimeReplacement
 import dev.iiahmed.lowbyte.downgrade.DowngradeContext
 import org.objectweb.asm.ClassVisitor
+import org.objectweb.asm.Handle
 import org.objectweb.asm.MethodVisitor
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.Type
@@ -55,6 +55,18 @@ class ApiTransformer(
 
     private companion object {
         const val HELPER_PREFIX = "lowbyte\$api\$"
+
+        /**
+         * The handle kinds that name a method.
+         *
+         * The field kinds carry a field descriptor, which no rewrite can match
+         * and the index cannot be asked about, so they are left alone. So is
+         * `H_NEWINVOKESPECIAL`, a constructor reference, which names `<init>`.
+         */
+        val INVOKE_TAGS = setOf(
+            Opcodes.H_INVOKEVIRTUAL, Opcodes.H_INVOKESTATIC,
+            Opcodes.H_INVOKESPECIAL, Opcodes.H_INVOKEINTERFACE
+        )
     }
 
     private class Helper(val name: String, val descriptor: String, val rewrite: InlineRewrite)
@@ -134,6 +146,81 @@ class ApiTransformer(
         }
 
         /**
+         * A method reference names its target in a bootstrap argument.
+         *
+         * `String::isBlank` puts `java/lang/String.isBlank` in a [Handle], not in
+         * an instruction, so checking call sites alone never sees it. Left alone
+         * it is neither rebuilt nor reported, and fails at the first use with a
+         * `BootstrapMethodError` wrapping a `NoSuchMethodError`.
+         *
+         * Only the arguments are walked. The bootstrap itself is
+         * `LambdaMetafactory` or one of its kind, never something with a rebuild,
+         * and a constant dynamic is left to [ConstantDynamicTransform] rather
+         * than rebuilt from underneath it.
+         */
+        override fun visitInvokeDynamicInsn(
+            name: String?,
+            descriptor: String?,
+            bootstrapMethodHandle: Handle?,
+            vararg bootstrapMethodArguments: Any?
+        ) {
+            val arguments = Array(bootstrapMethodArguments.size) { index ->
+                when (val argument = bootstrapMethodArguments[index]) {
+                    is Handle -> rewriteHandle(argument)
+                    else -> argument
+                }
+            }
+            super.visitInvokeDynamicInsn(name, descriptor, bootstrapMethodHandle, *arguments)
+        }
+
+        /**
+         * The same decision as a call site, reached through a handle.
+         *
+         * Field handles carry a field descriptor rather than a method one, so
+         * they are passed straight through: nothing here could match, and asking
+         * the index about them would invent a finding.
+         */
+        private fun rewriteHandle(handle: Handle): Handle {
+            if (handle.tag !in INVOKE_TAGS) return handle
+
+            val rewrite = ApiRewrites.forCall(handle.owner, handle.name, handle.desc)
+            if (rewrite == null || settings.targetJava >= rewrite.introducedIn) {
+                reportIfMissing(handle.owner, handle.name, handle.desc)
+                return handle
+            }
+
+            // Dispatch stays the rewrite's, exactly as at a call site. The two
+            // moves just produce a handle here instead of an instruction.
+            var replaced = handle
+            rewrite.apply(
+                ApiCallSite(
+                    owner = handle.owner,
+                    name = handle.name,
+                    descriptor = handle.desc,
+                    rebuildInline = { inline ->
+                        val helper = addHelper(
+                            helperDescriptor(handle.tag == Opcodes.H_INVOKESTATIC, handle.owner, handle.desc),
+                            inline
+                        )
+                        replaced = Handle(
+                            Opcodes.H_INVOKESTATIC, className, helper.name, helper.descriptor,
+                            this@ApiTransformer.isInterface
+                        )
+                    },
+                    forwardToRuntime = { replacement ->
+                        // An unbound receiver becomes the first parameter, which
+                        // is the shape the utility method already has.
+                        replaced = Handle(
+                            Opcodes.H_INVOKESTATIC, settings.runtimeClassName,
+                            replacement.method, replacement.methodDescriptor, false
+                        )
+                    }
+                )
+            )
+            return replaced
+        }
+
+        /**
          * Points the call at the injected utility.
          *
          * An instance call already has its receiver below the arguments, which
@@ -149,22 +236,10 @@ class ApiTransformer(
 
         /** Points the call at a generated method in this class. */
         private fun rebuildInline(opcode: Int, owner: String, descriptor: String, rewrite: InlineRewrite) {
-            // An instance call leaves its receiver on the stack, so the generated
-            // method has to take it as a first parameter or the operands no
-            // longer match. The rewrites all read their arguments from slot 0.
-            val helperDescriptor = if (opcode == Opcodes.INVOKESTATIC) {
-                descriptor
-            } else {
-                Type.getMethodDescriptor(
-                    Type.getReturnType(descriptor),
-                    Type.getObjectType(owner),
-                    *Type.getArgumentTypes(descriptor)
-                )
-            }
-
-            val helper = Helper("$HELPER_PREFIX${helpers.size}", helperDescriptor, rewrite)
-            helpers += helper
-
+            val helper = addHelper(
+                helperDescriptor(opcode == Opcodes.INVOKESTATIC, owner, descriptor),
+                rewrite
+            )
             super.visitMethodInsn(
                 Opcodes.INVOKESTATIC, className, helper.name, helper.descriptor,
                 this@ApiTransformer.isInterface
@@ -187,6 +262,28 @@ class ApiTransformer(
             }
         }
     }
+
+    /**
+     * The descriptor a generated method needs to stand in for a call.
+     *
+     * An instance call leaves its receiver on the stack, so the generated method
+     * has to take it as a first parameter or the operands no longer match. The
+     * rewrites all read their arguments from slot 0. A method reference is the
+     * same shape: an unbound receiver arrives as the first argument.
+     */
+    private fun helperDescriptor(isStatic: Boolean, owner: String, descriptor: String): String =
+        if (isStatic) {
+            descriptor
+        } else {
+            Type.getMethodDescriptor(
+                Type.getReturnType(descriptor),
+                Type.getObjectType(owner),
+                *Type.getArgumentTypes(descriptor)
+            )
+        }
+
+    private fun addHelper(descriptor: String, rewrite: InlineRewrite): Helper =
+        Helper("$HELPER_PREFIX${helpers.size}", descriptor, rewrite).also { helpers += it }
 
     private fun generateHelper(helper: Helper) {
         val access = Opcodes.ACC_STATIC or Opcodes.ACC_SYNTHETIC or

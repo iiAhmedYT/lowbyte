@@ -2,6 +2,7 @@ package dev.iiahmed.lowbyte.api
 
 import org.objectweb.asm.ClassReader
 import org.objectweb.asm.ClassVisitor
+import org.objectweb.asm.Handle
 import org.objectweb.asm.MethodVisitor
 import org.objectweb.asm.Opcodes
 
@@ -95,11 +96,32 @@ object ApiRewrites {
                     isInterface: Boolean
                 ) {
                     if (owner == null || insnName == null || insnDescriptor == null) return
+                    record(owner, insnName, insnDescriptor)
+                }
 
-                    val rewrite = forCall(owner, insnName, insnDescriptor)
+                /**
+                 * A method reference needs the same utility method a call does.
+                 *
+                 * `String::isBlank` names its target in a bootstrap argument, so
+                 * counting call sites alone would leave the rewritten handle
+                 * pointing at a method that was never injected.
+                 */
+                override fun visitInvokeDynamicInsn(
+                    insnName: String?,
+                    insnDescriptor: String?,
+                    bootstrapMethodHandle: Handle?,
+                    vararg bootstrapMethodArguments: Any?
+                ) {
+                    bootstrapMethodArguments.forEach { argument ->
+                        if (argument is Handle) record(argument.owner, argument.name, argument.desc)
+                    }
+                }
+
+                private fun record(owner: String, name: String, descriptor: String) {
+                    val rewrite = forCall(owner, name, descriptor)
                     if (rewrite !is RuntimeRewrite || targetJava >= rewrite.introducedIn) return
 
-                    rewrite.replacementFor(owner, insnName, insnDescriptor)?.let { needed += it.key }
+                    rewrite.replacementFor(owner, name, descriptor)?.let { needed += it.key }
                 }
             }
         }, 0)
