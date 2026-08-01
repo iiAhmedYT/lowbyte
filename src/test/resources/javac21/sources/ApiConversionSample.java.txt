@@ -1,3 +1,14 @@
+import java.io.ByteArrayInputStream;
+import java.io.Reader;
+import java.io.StringReader;
+import java.io.StringWriter;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.util.Comparator;
 import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -49,6 +60,16 @@ public class ApiConversionSample {
         catch (Throwable t) { return t.getClass().getSimpleName(); }
     }
 
+    /** A body that throws checked exceptions, so the real type is reported rather than a wrapper. */
+    private interface Fallible {
+        Object call() throws Exception;
+    }
+
+    private static String attemptIo(Fallible f) {
+        try { f.call(); return "ok"; }
+        catch (Throwable t) { return t.getClass().getSimpleName(); }
+    }
+
     /**
      * The exception message as well as its type.
      *
@@ -65,7 +86,7 @@ public class ApiConversionSample {
         return new TreeSet<>((java.util.Collection<String>) values).toString();
     }
 
-    public static String runAll() {
+    public static String runAll() throws Exception {
         List<String> out = new ArrayList<>();
 
         List<String> list = List.of("b", "a", "b");
@@ -350,10 +371,102 @@ public class ApiConversionSample {
         withNullValue.put("k", null);
         out.add("mapCopy.nullValue=" + attempt(() -> Map.copyOf(withNullValue)));
 
+        nio(out);
+
         return String.join("\n", out);
     }
 
-    public static void main(String[] args) {
+    /**
+     * The NIO rewrites, which need real files.
+     *
+     * Only contents, lengths and exception names are printed. A temp path varies
+     * per run and must never reach the baseline.
+     */
+    private static void nio(List<String> out) throws Exception {
+        Path dir = Files.createTempDirectory("lowbyte");
+        try {
+            Path text = dir.resolve("text.txt");
+
+            // Path.of is Paths.get under a newer name.
+            out.add("path.of=" + Path.of(dir.toString(), "text.txt").equals(text));
+            out.add("path.ofUri=" + Path.of(dir.toUri()).equals(dir));
+
+            out.add("files.writeStringReturns=" + Files.writeString(text, "hello").equals(text));
+            out.add("files.readString=" + Files.readString(text));
+            // Compared rather than printed: the bytes are the point, and a
+            // console encoding must not be able to reach the baseline.
+            String unicode = "e\u0301\u00E9\u2028";
+            out.add("files.roundTripUtf8=" + Files.readString(
+                Files.writeString(dir.resolve("u.txt"), unicode)).equals(unicode));
+            out.add("files.readStringCharset=" + Files.readString(text, StandardCharsets.UTF_8));
+
+            // Appending, to prove the OpenOption varargs reach Files.write.
+            Files.writeString(text, " again", StandardOpenOption.APPEND);
+            out.add("files.append=" + Files.readString(text));
+
+            // A strict decoder is the whole point: new String(bytes, UTF_8)
+            // would hand back a replacement character instead of throwing.
+            Path bad = dir.resolve("bad.bin");
+            Files.write(bad, new byte[] { (byte) 0xC3, (byte) 0x28 });
+            out.add("files.readStringMalformed=" + attemptIo(() -> Files.readString(bad)));
+            out.add("files.writeStringUnmappable=" + attemptIo(() ->
+                Files.writeString(dir.resolve("a.txt"), "\u00E9", StandardCharsets.US_ASCII)));
+
+            Path one = dir.resolve("1.bin");
+            Path two = dir.resolve("2.bin");
+            Files.write(one, new byte[] { 1, 2, 3 });
+            Files.write(two, new byte[] { 1, 2, 3 });
+            out.add("files.mismatchEqual=" + Files.mismatch(one, two));
+            out.add("files.mismatchSameFile=" + Files.mismatch(one, one));
+            Files.write(two, new byte[] { 1, 9, 3 });
+            out.add("files.mismatchAt1=" + Files.mismatch(one, two));
+            Files.write(two, new byte[] { 1, 2 });
+            out.add("files.mismatchPrefix=" + Files.mismatch(one, two));
+            Files.write(two, new byte[0]);
+            out.add("files.mismatchEmpty=" + Files.mismatch(one, two));
+
+            // Bigger than one 8192-byte block, so the loop has to carry position
+            // across reads rather than reporting an offset within a block.
+            byte[] big = new byte[20000];
+            byte[] altered = big.clone();
+            altered[15000] = 7;
+            Files.write(one, big);
+            Files.write(two, altered);
+            out.add("files.mismatchAcrossBlocks=" + Files.mismatch(one, two));
+
+            // Declared as Reader, since javac writes the static receiver type as
+            // the call's owner.
+            StringWriter sink = new StringWriter();
+            Reader reader = new StringReader("hello");
+            out.add("reader.transferTo=" + reader.transferTo(sink) + "[" + sink + "]");
+            out.add("reader.transferToEmpty=" + ((Reader) new StringReader("")).transferTo(new StringWriter()));
+            out.add("reader.transferToNull=" + attemptIo(() ->
+                ((Reader) new StringReader("x")).transferTo(null)));
+
+            // One char per read, so the loop has to run rather than a single
+            // read appearing to be enough.
+            StringWriter dripped = new StringWriter();
+            Reader slow = new StringReader("hello") {
+                @Override public int read(char[] into, int offset, int length) throws java.io.IOException {
+                    return super.read(into, offset, Math.min(length, 1));
+                }
+            };
+            out.add("reader.transferToDripping=" + slow.transferTo(dripped) + "[" + dripped + "]");
+
+            // Past the 8192 buffer, so position has to carry across reads.
+            StringBuilder large = new StringBuilder();
+            for (int i = 0; i < 20000; i++) large.append('x');
+            out.add("reader.transferToLarge="
+                + ((Reader) new StringReader(large.toString())).transferTo(new StringWriter()));
+
+        } finally {
+            try (Stream<Path> walk = Files.walk(dir)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(p -> p.toFile().delete());
+            }
+        }
+    }
+
+    public static void main(String[] args) throws Exception {
         System.out.println(runAll());
     }
 }

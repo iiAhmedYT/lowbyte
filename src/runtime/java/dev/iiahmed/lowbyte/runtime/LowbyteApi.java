@@ -1,5 +1,19 @@
 package dev.iiahmed.lowbyte.runtime;
 
+import java.io.Reader;
+import java.io.Writer;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.charset.Charset;
+import java.nio.charset.CharsetDecoder;
+import java.nio.charset.CharsetEncoder;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.OpenOption;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -540,6 +554,150 @@ public final class LowbyteApi {
                             + ") out of bounds for length " + length);
         }
         return fromIndex;
+    }
+
+    /**
+     * {@code Files.readString(Path)}, which is UTF-8.
+     */
+    @LowbyteInfo(
+            owner = "java/nio/file/Files", name = "readString", introducedIn = 11,
+            descriptor = "(Ljava/nio/file/Path;)Ljava/lang/String;"
+    )
+    public static String readString(Path path) throws IOException {
+        return readString(path, StandardCharsets.UTF_8);
+    }
+
+    /**
+     * {@code Files.readString(Path, Charset)}.
+     * <p>
+     * Not {@code new String(bytes, charset)}. That substitutes U+FFFD for input
+     * the charset cannot decode, where this throws {@code MalformedInputException},
+     * so the difference between a corrupt file and a valid one would disappear.
+     */
+    @LowbyteInfo(
+            owner = "java/nio/file/Files", name = "readString", introducedIn = 11,
+            descriptor = "(Ljava/nio/file/Path;Ljava/nio/charset/Charset;)Ljava/lang/String;"
+    )
+    public static String readString(Path path, Charset charset) throws IOException {
+        Objects.requireNonNull(path);
+        Objects.requireNonNull(charset);
+
+        CharsetDecoder decoder = charset.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT);
+        return decoder.decode(ByteBuffer.wrap(Files.readAllBytes(path))).toString();
+    }
+
+    /** {@code Files.writeString(Path, CharSequence, OpenOption...)}, which is UTF-8. */
+    @LowbyteInfo(
+            owner = "java/nio/file/Files", name = "writeString", introducedIn = 11,
+            descriptor = "(Ljava/nio/file/Path;Ljava/lang/CharSequence;[Ljava/nio/file/OpenOption;)Ljava/nio/file/Path;"
+    )
+    public static Path writeString(Path path, CharSequence text, OpenOption... options) throws IOException {
+        return writeString(path, text, StandardCharsets.UTF_8, options);
+    }
+
+    /**
+     * {@code Files.writeString(Path, CharSequence, Charset, OpenOption...)}.
+     * <p>
+     * Not {@code text.toString().getBytes(charset)}, for the same reason as
+     * {@link #readString}: that writes a question mark for anything the charset
+     * cannot represent, where this throws {@code UnmappableCharacterException}.
+     */
+    @LowbyteInfo(
+            owner = "java/nio/file/Files", name = "writeString", introducedIn = 11,
+            descriptor = "(Ljava/nio/file/Path;Ljava/lang/CharSequence;Ljava/nio/charset/Charset;[Ljava/nio/file/OpenOption;)Ljava/nio/file/Path;"
+    )
+    public static Path writeString(Path path, CharSequence text, Charset charset, OpenOption... options)
+            throws IOException {
+        Objects.requireNonNull(path);
+        Objects.requireNonNull(text);
+        Objects.requireNonNull(charset);
+
+        CharsetEncoder encoder = charset.newEncoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT);
+        ByteBuffer encoded = encoder.encode(CharBuffer.wrap(text));
+
+        // The buffer's backing array is usually longer than what was written.
+        byte[] bytes = new byte[encoded.remaining()];
+        encoded.get(bytes);
+        return Files.write(path, bytes, options);
+    }
+
+    /**
+     * {@code Files.mismatch}, the index of the first differing byte or -1.
+     * <p>
+     * Compared a block at a time rather than by reading both files in whole, so
+     * mismatching two very large files costs what the JDK charges rather than
+     * their combined size in heap.
+     */
+    @LowbyteInfo(
+            owner = "java/nio/file/Files", name = "mismatch",
+            descriptor = "(Ljava/nio/file/Path;Ljava/nio/file/Path;)J", introducedIn = 12
+    )
+    public static long mismatch(Path left, Path right) throws IOException {
+        if (Files.isSameFile(left, right)) return -1L;
+
+        byte[] leftBlock = new byte[8192];
+        byte[] rightBlock = new byte[8192];
+        long position = 0L;
+
+        try (InputStream leftStream = Files.newInputStream(left)) {
+            try (InputStream rightStream = Files.newInputStream(right)) {
+                while (true) {
+                    int leftRead = fill(leftStream, leftBlock);
+                    int rightRead = fill(rightStream, rightBlock);
+
+                    int shared = Math.min(leftRead, rightRead);
+                    for (int i = 0; i < shared; i++) {
+                        if (leftBlock[i] != rightBlock[i]) return position + i;
+                    }
+                    // One ran out first, so the shorter file is a prefix of the
+                    // other and the mismatch is where it ended.
+                    if (leftRead != rightRead) return position + shared;
+                    if (leftRead == 0) return -1L;
+                    position += leftRead;
+                }
+            }
+        }
+    }
+
+    /** Reads until the block is full or the stream ends, since read may return early. */
+    private static int fill(InputStream stream, byte[] block) throws IOException {
+        int total = 0;
+        while (total < block.length) {
+            int read = stream.read(block, total, block.length - total);
+            if (read < 0) break;
+            total += read;
+        }
+        return total;
+    }
+
+    /**
+     * {@code Reader.transferTo}, a loop over {@code read} and {@code write}.
+     * <p>
+     * {@code Reader} is not final, so forwarding to a static method here loses
+     * virtual dispatch and an override would be bypassed. Safe in practice
+     * because no JDK {@code Reader} declares its own: the method is declared on
+     * {@code Reader} and inherited everywhere, unlike
+     * {@code InputStream.readAllBytes}, which {@code ByteArrayInputStream} and
+     * {@code FileInputStream} both override and which is therefore reported
+     * rather than rewritten.
+     */
+    @LowbyteInfo(owner = "java/io/Reader", name = "transferTo",
+            descriptor = "(Ljava/io/Writer;)J", introducedIn = 10)
+    public static long transferTo(Reader reader, Writer out) throws IOException {
+        Objects.requireNonNull(out, "out");
+
+        char[] buffer = new char[8192];
+        long transferred = 0L;
+        int read;
+        while ((read = reader.read(buffer, 0, buffer.length)) >= 0) {
+            out.write(buffer, 0, read);
+            transferred += read;
+        }
+        return transferred;
     }
 
     /**

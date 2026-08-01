@@ -34,6 +34,9 @@ object ApiBytecode {
     const val OPTIONAL_LONG = "java/util/OptionalLong"
     const val OPTIONAL_DOUBLE = "java/util/OptionalDouble"
 
+    const val PATH = "java/nio/file/Path"
+    const val PATHS = "java/nio/file/Paths"
+
     const val PREDICATE = "java/util/function/Predicate"
 
     const val SIMPLE_IMMUTABLE_ENTRY = "java/util/AbstractMap\$SimpleImmutableEntry"

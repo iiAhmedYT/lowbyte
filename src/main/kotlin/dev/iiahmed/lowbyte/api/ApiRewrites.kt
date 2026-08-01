@@ -18,10 +18,15 @@ import dev.iiahmed.lowbyte.api.rewrite.MapOfRewrite
 import dev.iiahmed.lowbyte.api.rewrite.ObjectsCheckFromIndexSizeRewrite
 import dev.iiahmed.lowbyte.api.rewrite.ObjectsCheckFromToIndexRewrite
 import dev.iiahmed.lowbyte.api.rewrite.ObjectsCheckIndexRewrite
+import dev.iiahmed.lowbyte.api.rewrite.FilesMismatchRewrite
+import dev.iiahmed.lowbyte.api.rewrite.FilesReadStringRewrite
+import dev.iiahmed.lowbyte.api.rewrite.FilesWriteStringRewrite
 import dev.iiahmed.lowbyte.api.rewrite.OptionalIsEmptyRewrite
 import dev.iiahmed.lowbyte.api.rewrite.OptionalOrElseThrowRewrite
 import dev.iiahmed.lowbyte.api.rewrite.OptionalStreamRewrite
+import dev.iiahmed.lowbyte.api.rewrite.ReaderTransferToRewrite
 import dev.iiahmed.lowbyte.api.rewrite.RequireNonNullElseRewrite
+import dev.iiahmed.lowbyte.api.rewrite.PathOfRewrite
 import dev.iiahmed.lowbyte.api.rewrite.PredicateNotRewrite
 import dev.iiahmed.lowbyte.api.rewrite.SetCopyOfRewrite
 import dev.iiahmed.lowbyte.api.rewrite.SetOfRewrite
@@ -65,6 +70,12 @@ object ApiRewrites {
         OptionalStreamRewrite.OfDouble,
         StreamOfNullableRewrite,
         StreamToListRewrite,
+        PathOfRewrite.OfStrings,
+        PathOfRewrite.OfUri,
+        FilesReadStringRewrite,
+        FilesWriteStringRewrite,
+        FilesMismatchRewrite,
+        ReaderTransferToRewrite,
         PredicateNotRewrite,
         CollectorsToUnmodifiableListRewrite,
         CollectorsToUnmodifiableSetRewrite,

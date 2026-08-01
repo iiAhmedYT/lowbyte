@@ -95,6 +95,10 @@ release all come from its `@LowbyteInfo`, so no Kotlin can fall out of step with
   `ct.sym` both ways.
 - Only rewrite where the observable contract matches. If the older equivalent differs on
   nulls, duplicates, mutability, ordering or exceptions, leave it to be reported.
+- **Never rewrite an overridable instance method.** Forwarding to the utility is a static
+  call, so any override is bypassed. Safe targets are static methods, methods on final
+  classes, and rewrites that emit a call to an older method so dispatch is preserved.
+  `InputStream.readAllBytes` looked fine and was not: `ByteArrayInputStream` overrides it.
 - If an inline rewrite needs a scratch local, work its slot out from the descriptor rather
   than hardcoding one. The arguments below it differ per call, so a fixed slot works until
   the first rewrite with a different signature overwrites an argument with it.

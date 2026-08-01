@@ -28,18 +28,19 @@ Only calls whose observable contract can be kept. These go into a `lowbyte$api$N
 the same class, with nothing added to the jar; the ones that need more than that are in
 [the injected utility](#the-injected-utility) below.
 
-| Call                     | Since | Rebuilt as                                                      |
-|--------------------------|-------|-----------------------------------------------------------------|
-| `Optional.isEmpty`       | 11    | `!isPresent()`                                                  |
-| `Predicate.not`          | 11    | `negate()`, which is its own body and a Java 8 default method   |
-| `Stream.ofNullable`      | 9     | `t == null ? Stream.empty() : Stream.of(t)`, its own body       |
-| `Optional.orElseThrow()` | 10    | `get()`, which throws the same exception and message            |
-| `Optional.stream`        | 9     | `isPresent() ? Stream.of(get()) : Stream.empty()`, its own body |
+| Call                     | Since | Rebuilt as                                                           |
+|--------------------------|-------|----------------------------------------------------------------------|
+| `Optional.isEmpty`       | 11    | `!isPresent()`                                                       |
+| `Predicate.not`          | 11    | `negate()`, which is its own body and a Java 8 default method        |
+| `Path.of`                | 11    | `Paths.get`, the same factory under a newer name, both overloads     |
+| `Stream.ofNullable`      | 9     | `t == null ? Stream.empty() : Stream.of(t)`, its own body            |
+| `Optional.orElseThrow()` | 10    | `get()`, which throws the same exception and message                 |
+| `Optional.stream`        | 9     | `isPresent() ? Stream.of(get()) : Stream.empty()`, its own body      |
 | `Stream.toList`          | 16    | `unmodifiableList(new ArrayList<>(asList(toArray())))`, its own body |
-| `OptionalInt.stream`     | 9     | the same, over `IntStream`                                      |
-| `OptionalLong.stream`    | 9     | the same, over `LongStream`                                     |
-| `OptionalDouble.stream`  | 9     | the same, over `DoubleStream`                                   |
-| `Map.entry`              | 9     | `AbstractMap.SimpleImmutableEntry`, nulls rejected              |
+| `OptionalInt.stream`     | 9     | the same, over `IntStream`                                           |
+| `OptionalLong.stream`    | 9     | the same, over `LongStream`                                          |
+| `OptionalDouble.stream`  | 9     | the same, over `DoubleStream`                                        |
+| `Map.entry`              | 9     | `AbstractMap.SimpleImmutableEntry`, nulls rejected                   |
 
 ### Details worth knowing
 
@@ -102,6 +103,10 @@ copied into that jar and the call site is pointed at it.
 | `Collectors.toUnmodifiableList` | 10    | a `Collector`, and the Java 8 one underneath accepts nulls              |
 | `Collectors.toUnmodifiableSet`  | 10    | the same                                                                |
 | `Collectors.toUnmodifiableMap`  | 10    | the same, both overloads                                                |
+| `Files.readString`              | 11    | a strict decoder, so malformed input throws instead of substituting     |
+| `Files.writeString`             | 11    | the same going out, so an unmappable character throws                   |
+| `Files.mismatch`                | 12    | a block-at-a-time comparison, so a loop                                 |
+| `Reader.transferTo`             | 10    | a loop over `read` and `write`, returning the count                     |
 
 **The bounds checks return their index**, so they read inside an expression rather than
 above one, and all three throw `IndexOutOfBoundsException`. Only the message tells them
@@ -143,6 +148,27 @@ about forty-five methods, against two for a `Collection`, so this is a far narro
 than the one `List.copyOf` guards, and the second copy costs more than half the runtime.
 Streams built the normal way, from a collection or `StreamSupport`, are unaffected.
 
+**`Reader.transferTo` is rewritten and `InputStream.transferTo` is not.** Not because of
+runtime dispatch: on Java 8 none of these methods exist, so there is no override to lose.
+The difference is how many implementations the JDK ships. `ByteArrayInputStream` and
+`FileInputStream` specialise the `InputStream` ones, and one generic replacement cannot be
+all of them at once, which is measurable: `readNBytes(b, 0, 5)` gives 1 on a real Java 21
+and 5 through a rewrite. `Reader.transferTo` is declared once and inherited everywhere, so
+one replacement is all of it.
+
+**What a rewrite does cost is your own override.** A rewrite is a static call, so this loses
+one:
+
+```java
+class MyReader extends Reader { @Override public long transferTo(Writer w) { ... } }
+
+Reader r = new MyReader();   // declared Reader, so the owner is java/io/Reader
+r.transferTo(w);             // rewritten, and the override does not run
+```
+
+Only that shape. javac writes the declared type as the owner, so `MyReader r` or
+`BufferedReader r` are not matched at all and are reported instead.
+
 **`String.lines` is eager.** It builds the list and streams it, where the JDK's is lazy.
 Same elements in the same order, different memory profile on a very large string.
 
@@ -183,8 +209,12 @@ Then keeping it distinct is your problem.
 Everything not in either table above, as a warning naming the call. Between Java 8 and 21
 the JDK gained over three thousand public members, and most have no faithful replacement:
 
-- `Files.readString` throws where `new String(bytes, UTF_8)` silently substitutes
+- `Files.newDirectoryStream` filters differ per provider, so a rebuild would guess
 - `Stream.iterate(seed, hasNext, next)` needs a stateful `Spliterator`, not an expression
+- `InputStream.readAllBytes`, `readNBytes` and `transferTo` are overridable, and
+  `ByteArrayInputStream` overrides all three. A rewrite forwards to one fixed implementation,
+  so the override would never run: measured, `readNBytes(b, 0, 5)` returns 1 on a real Java 21
+  and 5 through a rewrite
 - `Stream.takeWhile` needs a stateful `Spliterator`, not an expression
 - `String.describeConstable` and `resolveConstantDesc` return `java.lang.constant` types,
   and that package does not exist before 12 for any replacement to hand back
