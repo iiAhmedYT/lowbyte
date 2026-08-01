@@ -14,12 +14,25 @@ import org.objectweb.asm.Opcodes
 object ApiBytecode {
 
     const val OBJECT = "Ljava/lang/Object;"
+    const val OBJECT_ARRAY = "[Ljava/lang/Object;"
+
+    const val LIST = "java/util/List"
+    const val ARRAYS = "java/util/Arrays"
+    const val COLLECTIONS = "java/util/Collections"
 
     const val MAP = "java/util/Map"
     const val OPTIONAL = "java/util/Optional"
 
     /** An interface, so its static methods are called with the interface flag set. */
     const val STREAM = "java/util/stream/Stream"
+
+    const val INT_STREAM = "java/util/stream/IntStream"
+    const val LONG_STREAM = "java/util/stream/LongStream"
+    const val DOUBLE_STREAM = "java/util/stream/DoubleStream"
+
+    const val OPTIONAL_INT = "java/util/OptionalInt"
+    const val OPTIONAL_LONG = "java/util/OptionalLong"
+    const val OPTIONAL_DOUBLE = "java/util/OptionalDouble"
 
     const val PREDICATE = "java/util/function/Predicate"
 

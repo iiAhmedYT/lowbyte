@@ -1,6 +1,10 @@
 package dev.iiahmed.lowbyte.api.rewrite
 
+import dev.iiahmed.lowbyte.api.ApiBytecode.ARRAYS
+import dev.iiahmed.lowbyte.api.ApiBytecode.COLLECTIONS
+import dev.iiahmed.lowbyte.api.ApiBytecode.LIST
 import dev.iiahmed.lowbyte.api.ApiBytecode.OBJECT
+import dev.iiahmed.lowbyte.api.ApiBytecode.OBJECT_ARRAY
 import dev.iiahmed.lowbyte.api.ApiBytecode.STREAM
 import dev.iiahmed.lowbyte.api.InlineRewrite
 import org.objectweb.asm.Label
@@ -41,6 +45,40 @@ object StreamOfNullableRewrite : InlineRewrite() {
         // from the one the method started with.
         mv.visitFrame(Opcodes.F_SAME, 0, null, 0, null)
         mv.visitMethodInsn(Opcodes.INVOKESTATIC, STREAM, "empty", "()L$STREAM;", true)
+        mv.visitInsn(Opcodes.ARETURN)
+    }
+}
+
+/**
+ * `Stream.toList`:
+ *
+ * ```
+ * Collections.unmodifiableList(Arrays.asList(stream.toArray()))
+ * ```
+ *
+ * The JDK wraps that array in a `new ArrayList<>(...)` first. Dropped: it is a
+ * second full copy, and it only defends against a hand-written `Stream` whose
+ * `toArray` returns an array it keeps. See APIs.md.
+ *
+ * Not `collect(Collectors.toList())`: modifiable, and slower. Nulls are allowed,
+ * which is why this does not reuse `List.copyOf`.
+ */
+object StreamToListRewrite : InlineRewrite() {
+
+    override val name = "Stream.toList"
+
+    override val introducedIn = 16
+
+    override fun matches(owner: String, name: String, descriptor: String) =
+        owner == STREAM && name == "toList" && descriptor == "()L$LIST;"
+
+    override fun write(mv: MethodVisitor, descriptor: String) {
+        mv.visitVarInsn(Opcodes.ALOAD, 0)
+        mv.visitMethodInsn(Opcodes.INVOKEINTERFACE, STREAM, "toArray", "()$OBJECT_ARRAY", true)
+        mv.visitMethodInsn(Opcodes.INVOKESTATIC, ARRAYS, "asList", "($OBJECT_ARRAY)L$LIST;", false)
+        mv.visitMethodInsn(
+            Opcodes.INVOKESTATIC, COLLECTIONS, "unmodifiableList", "(L$LIST;)L$LIST;", false
+        )
         mv.visitInsn(Opcodes.ARETURN)
     }
 }

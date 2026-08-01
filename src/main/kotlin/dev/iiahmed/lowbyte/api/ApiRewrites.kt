@@ -20,11 +20,13 @@ import dev.iiahmed.lowbyte.api.rewrite.ObjectsCheckFromToIndexRewrite
 import dev.iiahmed.lowbyte.api.rewrite.ObjectsCheckIndexRewrite
 import dev.iiahmed.lowbyte.api.rewrite.OptionalIsEmptyRewrite
 import dev.iiahmed.lowbyte.api.rewrite.OptionalOrElseThrowRewrite
+import dev.iiahmed.lowbyte.api.rewrite.OptionalStreamRewrite
 import dev.iiahmed.lowbyte.api.rewrite.RequireNonNullElseRewrite
 import dev.iiahmed.lowbyte.api.rewrite.PredicateNotRewrite
 import dev.iiahmed.lowbyte.api.rewrite.SetCopyOfRewrite
 import dev.iiahmed.lowbyte.api.rewrite.SetOfRewrite
 import dev.iiahmed.lowbyte.api.rewrite.StreamOfNullableRewrite
+import dev.iiahmed.lowbyte.api.rewrite.StreamToListRewrite
 import dev.iiahmed.lowbyte.api.rewrite.StringFormattedRewrite
 import dev.iiahmed.lowbyte.api.rewrite.StringIndentRewrite
 import dev.iiahmed.lowbyte.api.rewrite.StringIsBlankRewrite
@@ -57,7 +59,12 @@ object ApiRewrites {
         MapCopyOfRewrite,
         OptionalIsEmptyRewrite,
         OptionalOrElseThrowRewrite,
+        OptionalStreamRewrite.OfObject,
+        OptionalStreamRewrite.OfInt,
+        OptionalStreamRewrite.OfLong,
+        OptionalStreamRewrite.OfDouble,
         StreamOfNullableRewrite,
+        StreamToListRewrite,
         PredicateNotRewrite,
         CollectorsToUnmodifiableListRewrite,
         CollectorsToUnmodifiableSetRewrite,

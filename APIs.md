@@ -28,13 +28,18 @@ Only calls whose observable contract can be kept. These go into a `lowbyte$api$N
 the same class, with nothing added to the jar; the ones that need more than that are in
 [the injected utility](#the-injected-utility) below.
 
-| Call                         | Since | Rebuilt as                                                        |
-|------------------------------|-------|-------------------------------------------------------------------|
-| `Optional.isEmpty`           | 11    | `!isPresent()`                                                    |
-| `Predicate.not`              | 11    | `negate()`, which is its own body and a Java 8 default method     |
-| `Stream.ofNullable`          | 9     | `t == null ? Stream.empty() : Stream.of(t)`, its own body         |
-| `Optional.orElseThrow()`     | 10    | `get()`, which throws the same exception and message              |
-| `Map.entry`                  | 9     | `AbstractMap.SimpleImmutableEntry`, nulls rejected                |
+| Call                     | Since | Rebuilt as                                                      |
+|--------------------------|-------|-----------------------------------------------------------------|
+| `Optional.isEmpty`       | 11    | `!isPresent()`                                                  |
+| `Predicate.not`          | 11    | `negate()`, which is its own body and a Java 8 default method   |
+| `Stream.ofNullable`      | 9     | `t == null ? Stream.empty() : Stream.of(t)`, its own body       |
+| `Optional.orElseThrow()` | 10    | `get()`, which throws the same exception and message            |
+| `Optional.stream`        | 9     | `isPresent() ? Stream.of(get()) : Stream.empty()`, its own body |
+| `Stream.toList`          | 16    | `unmodifiableList(new ArrayList<>(asList(toArray())))`, its own body |
+| `OptionalInt.stream`     | 9     | the same, over `IntStream`                                      |
+| `OptionalLong.stream`    | 9     | the same, over `LongStream`                                     |
+| `OptionalDouble.stream`  | 9     | the same, over `DoubleStream`                                   |
+| `Map.entry`              | 9     | `AbstractMap.SimpleImmutableEntry`, nulls rejected              |
 
 ### Details worth knowing
 
@@ -130,6 +135,14 @@ an ordinary collection. The same goes for `indexOf`, `containsKey` and `contains
 are legal: `Collection.contains` documents that `NullPointerException` is optional. Code
 that probes an immutable collection with null was relying on the optional half.
 
+**`Stream.toList` copies once, not twice.** The JDK's body wraps the array in a
+`new ArrayList<>(...)` before making it unmodifiable, which defends against a hand-written
+`Stream` that returns an array it keeps a reference to. The rebuild skips that copy, so such
+a `Stream` can mutate the returned list afterwards. Implementing `Stream` by hand takes
+about forty-five methods, against two for a `Collection`, so this is a far narrower door
+than the one `List.copyOf` guards, and the second copy costs more than half the runtime.
+Streams built the normal way, from a collection or `StreamSupport`, are unaffected.
+
 **`String.lines` is eager.** It builds the list and streams it, where the JDK's is lazy.
 Same elements in the same order, different memory profile on a very large string.
 
@@ -171,7 +184,7 @@ Everything not in either table above, as a warning naming the call. Between Java
 the JDK gained over three thousand public members, and most have no faithful replacement:
 
 - `Files.readString` throws where `new String(bytes, UTF_8)` silently substitutes
-- `Stream.toList()` is unmodifiable where `Collectors.toList()` is not
+- `Stream.iterate(seed, hasNext, next)` needs a stateful `Spliterator`, not an expression
 - `Stream.takeWhile` needs a stateful `Spliterator`, not an expression
 - `String.describeConstable` and `resolveConstantDesc` return `java.lang.constant` types,
   and that package does not exist before 12 for any replacement to hand back

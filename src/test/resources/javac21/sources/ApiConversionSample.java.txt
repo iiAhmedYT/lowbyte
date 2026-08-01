@@ -6,6 +6,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalLong;
+import java.util.OptionalInt;
+import java.util.OptionalDouble;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.BinaryOperator;
@@ -119,6 +122,45 @@ public class ApiConversionSample {
         out.add("optional.isEmpty=" + Optional.empty().isEmpty() + "," + Optional.of("x").isEmpty());
         out.add("optional.orElseThrow=" + Optional.of("x").orElseThrow());
         out.add("optional.orElseThrowEmpty=" + attempt(() -> Optional.empty().orElseThrow()));
+
+        out.add("optional.stream=" + Optional.of("x").stream().collect(Collectors.toList()));
+        out.add("optional.streamEmpty=" + Optional.empty().stream().collect(Collectors.toList()));
+        out.add("optional.streamCount=" + Optional.of("x").stream().count()
+            + "," + Optional.empty().stream().count());
+        // The idiom it was added for, and it arrives as a method reference.
+        out.add("optional.flatMap=" + Stream.of(Optional.of("a"), Optional.<String>empty(), Optional.of("b"))
+            .flatMap(Optional::stream).collect(Collectors.toList()));
+        // A stream is consumed once, so a shared constant instead of a fresh one
+        // would show up here.
+        Stream<String> once = Optional.of("x").stream();
+        out.add("optional.streamFirstUse=" + once.count());
+        out.add("optional.streamSecondUse=" + attempt(() -> once.count()));
+
+        // The primitive ones differ only in which types they name, so a wrong
+        // getter or stream type on any of the three shows up here.
+        out.add("optionalInt.stream=" + Arrays.toString(OptionalInt.of(7).stream().toArray())
+            + Arrays.toString(OptionalInt.empty().stream().toArray()));
+        out.add("optionalLong.stream=" + Arrays.toString(OptionalLong.of(9L).stream().toArray())
+            + Arrays.toString(OptionalLong.empty().stream().toArray()));
+        out.add("optionalDouble.stream=" + Arrays.toString(OptionalDouble.of(1.5).stream().toArray())
+            + Arrays.toString(OptionalDouble.empty().stream().toArray()));
+        out.add("optionalInt.sum=" + OptionalInt.of(7).stream().sum()
+            + "," + OptionalInt.empty().stream().sum());
+        out.add("optionalDouble.methodRef=" + Stream.of(OptionalDouble.of(1.5), OptionalDouble.empty())
+            .flatMapToDouble(OptionalDouble::stream).sum());
+
+        // Unmodifiable, unlike collect(Collectors.toList()), and null-tolerant,
+        // unlike List.of and List.copyOf. Both halves of that are the point.
+        List<String> streamed = Stream.of("b", "a", "b").toList();
+        out.add("stream.toList=" + streamed);
+        out.add("stream.toListAdd=" + attempt(() -> streamed.add("z")));
+        out.add("stream.toListSet=" + attempt(() -> streamed.set(0, "z")));
+        out.add("stream.toListNulls=" + Stream.of("a", (String) null).toList());
+        out.add("stream.toListEmpty=" + Stream.<String>empty().toList());
+        out.add("stream.toListEquals=" + streamed.equals(Arrays.asList("b", "a", "b")));
+        // A snapshot: the array it was built from is not shared with the result.
+        out.add("stream.collectIsModifiable="
+            + attempt(() -> Stream.of("a").collect(Collectors.toList()).add("z")));
 
         // ofNullable is the JDK's own null check: empty() for null, and
         // otherwise the same single-element stream of(T) builds.
