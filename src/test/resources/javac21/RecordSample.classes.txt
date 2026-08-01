@@ -1,7 +1,0 @@
-RecordSample$Circle
-RecordSample$Group
-RecordSample$Pair
-RecordSample$Point
-RecordSample$Rect
-RecordSample$Shape
-RecordSample

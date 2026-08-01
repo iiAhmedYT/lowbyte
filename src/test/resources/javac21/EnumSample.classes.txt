@@ -1,6 +1,0 @@
-EnumSample$Branch
-EnumSample$Color
-EnumSample$IntCall
-EnumSample$Leaf
-EnumSample$Node
-EnumSample

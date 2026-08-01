@@ -1,3 +1,0 @@
-InterfaceSample$Empty
-InterfaceSample$Face
-InterfaceSample

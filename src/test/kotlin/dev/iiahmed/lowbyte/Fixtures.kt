@@ -14,6 +14,7 @@ import org.objectweb.asm.Handle
 import org.objectweb.asm.MethodVisitor
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.RecordComponentVisitor
+import java.util.zip.ZipInputStream
 import kotlin.test.fail
 
 /**
@@ -26,7 +27,10 @@ import kotlin.test.fail
  */
 object Fixtures {
 
-    private const val ROOT = "/javac21"
+    private const val ROOT = "/javac21/generated"
+
+    /** Where the hand-written sources live, as a resource path. */
+    const val SOURCES = "/javac21/sources"
 
     /**
      * Every sample the differential test runs.
@@ -41,6 +45,22 @@ object Fixtures {
 
     /** Samples that only make sense with the opt-in API conversion turned on. */
     val API_SAMPLES = listOf("ApiConversionSample", "RuntimeApiSample")
+
+    /**
+     * Samples that exist but are deliberately not run by the differential test.
+     *
+     * ApiSample calls Java 9 APIs on purpose to show what a downgrade cannot fix
+     * on its own, so running it on an older JVM is supposed to fail.
+     */
+    val EXCLUDED = listOf("ApiSample")
+
+    /**
+     * Every sample, however it is used.
+     *
+     * [sourcesAreAllAccountedFor][FixtureLayoutTest] holds this to the sources on
+     * disk, so a sample cannot be added and then silently never run.
+     */
+    val ALL_SAMPLES: List<String> get() = SAMPLES + API_SAMPLES + EXCLUDED
 
     const val SWITCH_BOOTSTRAPS = "java/lang/runtime/SwitchBootstraps"
     const val OBJECT_METHODS = "java/lang/runtime/ObjectMethods"
@@ -104,16 +124,52 @@ object Fixtures {
     fun nestsOf(sample: String): NestRegistry =
         NestRegistry.scan(classNames(sample).asSequence().map { readClass(it) })
 
-    /** The class names produced by compiling [sample]. */
+    /**
+     * Each sample's classes, read once.
+     *
+     * The archive is the class list as well as the classes, so there is no
+     * separate manifest to fall out of step with what is beside it.
+     */
+    private val classesBySample: Map<String, Map<String, ByteArray>> by lazy {
+        ALL_SAMPLES.associateWith { readClasses(it) }
+    }
+
+    private fun readClasses(sample: String): Map<String, ByteArray> {
+        val archive = javaClass.getResourceAsStream("$ROOT/$sample.classes.zip")
+            ?: fail("missing fixture $sample.classes.zip, run `gradlew regenerateJavac21Fixtures`")
+
+        val classes = linkedMapOf<String, ByteArray>()
+        archive.use { stream ->
+            ZipInputStream(stream).use { zip ->
+                while (true) {
+                    val entry = zip.nextEntry ?: break
+                    if (entry.name.endsWith(".class")) {
+                        classes[entry.name.removeSuffix(".class")] = zip.readBytes()
+                    }
+                }
+            }
+        }
+        check(classes.isNotEmpty()) { "$sample.classes.zip holds no classes" }
+        return classes
+    }
+
+    /** The class names produced by compiling [sample], in the order they were written. */
     fun classNames(sample: String): List<String> =
-        readText("$sample.classes.txt").lines().filter { it.isNotBlank() }
+        classesBySample[sample]?.keys?.toList()
+            ?: fail("unknown sample $sample, add it to one of Fixtures.SAMPLES, API_SAMPLES or EXCLUDED")
 
     /** What [sample] printed when run on a real JDK 21. */
     fun baseline(sample: String): String = readText("$sample.baseline.txt").trim()
 
+    /**
+     * A single class by name, from whichever sample compiled it.
+     *
+     * Samples compile separately and their top-level names are distinct, so a
+     * name identifies one class across the whole fixture set.
+     */
     fun readClass(name: String): ByteArray =
-        javaClass.getResourceAsStream("$ROOT/$name.classdata")?.use { it.readBytes() }
-            ?: fail("missing fixture $name.classdata, run `gradlew regenerateJavac21Fixtures`")
+        classesBySample.values.firstNotNullOfOrNull { it[name] }
+            ?: fail("missing fixture class $name, run `gradlew regenerateJavac21Fixtures`")
 
     private fun readText(fileName: String): String =
         javaClass.getResourceAsStream("$ROOT/$fileName")?.use { it.readBytes() }

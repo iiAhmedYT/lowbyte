@@ -4,6 +4,10 @@ import org.gradle.work.DisableCachingByDefault
 import org.gradle.process.ExecOperations
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.time.LocalDateTime
+import java.util.zip.CRC32
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 import javax.inject.Inject
 
 plugins {
@@ -114,23 +118,35 @@ abstract class RegenerateJavac21Fixtures @Inject constructor(
     @get:Internal
     abstract val javaLauncher: Property<JavaLauncher>
 
+    private companion object {
+        /**
+         * Stamped on every zip entry instead of the clock.
+         *
+         * Local rather than an instant, so the bytes do not depend on the
+         * timezone of whoever regenerated. DOS timestamps cannot go below 1980.
+         */
+        val ENTRY_TIME: LocalDateTime = LocalDateTime.of(1980, 2, 1, 0, 0, 0)
+    }
+
     @TaskAction
     fun regenerate() {
         val fixtures = fixtureDir.get().asFile
-        val sources = fixtures.listFiles { f: File -> f.name.endsWith(".java.txt") }
+        val sourceDir = File(fixtures, "sources")
+        val generatedDir = File(fixtures, "generated")
+
+        val sources = sourceDir.listFiles { f: File -> f.name.endsWith(".java.txt") }
             ?.sortedBy { it.name }
             .orEmpty()
-        check(sources.isNotEmpty()) { "No *.java.txt fixture sources found in $fixtures" }
+        check(sources.isNotEmpty()) { "No *.java.txt fixture sources found in $sourceDir" }
 
         val work = workDir.get().asFile
         work.deleteRecursively()
 
-        // Drop the previous generation first, so a class that is no longer
-        // produced does not linger as an orphan fixture.
-        fixtures.listFiles { f: File ->
-            f.name.endsWith(".classdata") || f.name.endsWith(".baseline.txt") ||
-                f.name.endsWith(".classes.txt") || f.name == "toolchain.txt"
-        }?.forEach { it.delete() }
+        // Everything under generated/ belongs to this task, so it goes wholesale
+        // rather than by extension. A sample that stops producing a class must
+        // not leave the old one behind as an orphan.
+        generatedDir.deleteRecursively()
+        generatedDir.mkdirs()
 
         val javac = javaCompiler.get().executablePath.asFile.absolutePath
         val java = javaLauncher.get().executablePath.asFile.absolutePath
@@ -155,9 +171,7 @@ abstract class RegenerateJavac21Fixtures @Inject constructor(
                 .toList()
             check(produced.isNotEmpty()) { "$name produced no class files" }
 
-            produced.forEach { it.copyTo(File(fixtures, "${it.nameWithoutExtension}.classdata"), overwrite = true) }
-            File(fixtures, "$name.classes.txt")
-                .writeText(produced.joinToString("\n") { it.nameWithoutExtension } + "\n")
+            writeClassesZip(File(generatedDir, "$name.classes.zip"), produced)
 
             val stdout = ByteArrayOutputStream()
             exec.exec {
@@ -166,7 +180,7 @@ abstract class RegenerateJavac21Fixtures @Inject constructor(
                 standardOutput = stdout
             }
             val baseline = stdout.toString(Charsets.UTF_8.name()).replace("\r\n", "\n").trim()
-            File(fixtures, "$name.baseline.txt").writeText(baseline + "\n")
+            File(generatedDir, "$name.baseline.txt").writeText(baseline + "\n")
 
             logger.lifecycle("$name: ${produced.size} classes, ${baseline.lines().size} baseline lines")
         }
@@ -177,9 +191,40 @@ abstract class RegenerateJavac21Fixtures @Inject constructor(
         // another machine can legitimately change the fixtures. Recording it
         // makes that show up in the diff instead of catching someone out.
         val metadata = javaLauncher.get().metadata
-        File(fixtures, "toolchain.txt").writeText(
+        File(generatedDir, "toolchain.txt").writeText(
             "${metadata.vendor} ${metadata.javaRuntimeVersion}\n"
         )
+    }
+
+    /**
+     * One archive per sample, holding every class it compiled to.
+     *
+     * Written so that regenerating an unchanged sample produces identical bytes,
+     * which is what keeps a no-op regeneration out of the diff. That needs all
+     * three of: entries in a fixed order, a fixed timestamp, and no compression,
+     * since deflate output is not guaranteed stable across JDK versions.
+     *
+     * Entries keep the honest `.class` extension. The `.classdata` rename exists
+     * so loose files are not picked up as classes on the test classpath, and an
+     * archive is not on the classpath.
+     */
+    private fun writeClassesZip(target: File, classes: List<File>) {
+        ZipOutputStream(target.outputStream().buffered()).use { zip ->
+            classes.sortedBy { it.name }.forEach { file ->
+                val bytes = file.readBytes()
+                zip.putNextEntry(
+                    ZipEntry(file.name).apply {
+                        method = ZipEntry.STORED
+                        size = bytes.size.toLong()
+                        compressedSize = bytes.size.toLong()
+                        crc = CRC32().apply { update(bytes) }.value
+                        setTimeLocal(ENTRY_TIME)
+                    }
+                )
+                zip.write(bytes)
+                zip.closeEntry()
+            }
+        }
     }
 }
 
@@ -280,7 +325,7 @@ abstract class VerifyOnJava8 @Inject constructor(
     }
 }
 
-tasks.register<VerifyOnJava8>("verifyOnJava8") {
+val verifyOnJava8 = tasks.register<VerifyOnJava8>("verifyOnJava8") {
     group = "lowbyte"
     description = "Downgrades the fixtures to Java 8 and runs them on a real JDK 8."
 
@@ -291,4 +336,43 @@ tasks.register<VerifyOnJava8>("verifyOnJava8") {
     java8Launcher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(8)) })
 
     outputs.upToDateWhen { false }
+}
+
+/**
+ * Whether a real JDK 8 can be had, without failing the build finding out.
+ *
+ * `launcherFor` returns a provider that only throws when resolved, so this asks
+ * the question early rather than letting `check` die on a machine that has no
+ * JDK 8 and no way to provision one.
+ */
+val java8Available: Boolean by lazy {
+    runCatching {
+        javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(8)) }.get()
+    }.isSuccess
+}
+
+/**
+ * The Java 8 run is the only check that proves anything about a Java 8 target.
+ *
+ * The test JVM links `StringConcatFactory`, accepts `invokeinterface` on a
+ * private method, and tolerates plenty else that a real 8 rejects, so a green
+ * `test` says very little on its own. It joins `check` wherever it can run.
+ *
+ * Where it cannot, it says so rather than passing quietly, and `-PrequireJava8`
+ * turns that into a failure. CI sets it, so a green build there means the same
+ * thing every time, while a contributor without a JDK 8 is not blocked.
+ */
+tasks.named("check") {
+    if (java8Available) {
+        dependsOn(verifyOnJava8)
+    } else if (providers.gradleProperty("requireJava8").isPresent) {
+        doFirst { error("no JDK 8 toolchain is available and -PrequireJava8 was set") }
+    } else {
+        doLast {
+            logger.lifecycle(
+                "NOTE: verifyOnJava8 did not run, no JDK 8 toolchain was available. " +
+                    "This build has not been checked against a real Java 8."
+            )
+        }
+    }
 }

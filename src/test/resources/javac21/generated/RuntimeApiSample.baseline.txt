@@ -95,6 +95,7 @@ stripIndent(32.32.32.32.32.32.97.10.32.32.32.32.98.10.32)=32.32.32.32.32.97.10.3
 stripIndent(32.32.32.32.97.10.32.32.32.32.98.10.9)=32.32.32.97.10.32.32.32.98.10
 chars=8361
 codePoints=8361
+methodRef.isBlank=true,false
 transform=<ab>
 transformLength=3
 formatted=a/b

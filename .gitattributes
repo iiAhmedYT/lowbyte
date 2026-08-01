@@ -3,7 +3,8 @@
 # them as binary, since a class file has NUL bytes within the first few dozen;
 # declaring it makes that a guarantee instead of a heuristic that has to keep
 # being right on every contributor's machine.
-*.classdata binary
+*.classdata   binary
+*.classes.zip binary
 
 # The wrapper jar, for the same reason.
 *.jar binary
@@ -13,7 +14,6 @@
 # regeneration into a whole-file diff. The tests normalise on read either way.
 *.java.txt     text eol=lf
 *.baseline.txt text eol=lf
-*.classes.txt  text eol=lf
 toolchain.txt  text eol=lf
 
 # The wrapper script is POSIX sh, so CRLF would break it at the shebang on

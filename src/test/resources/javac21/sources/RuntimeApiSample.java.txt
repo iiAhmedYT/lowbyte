@@ -87,6 +87,11 @@ public class RuntimeApiSample {
         out.add("chars=" + " a ".chars().sum());
         out.add("codePoints=" + " a ".codePoints().sum());
 
+        // A method reference names the JDK method in an invokedynamic bootstrap
+        // argument, not in a call instruction.
+        java.util.function.Predicate<String> blank = String::isBlank;
+        out.add("methodRef.isBlank=" + blank.test(" ") + "," + blank.test("x"));
+
         out.add("transform=" + "ab".transform(v -> "<" + v + ">"));
         out.add("transformLength=" + "abc".transform(String::length));
         out.add("formatted=" + "%s/%s".formatted("a", "b"));

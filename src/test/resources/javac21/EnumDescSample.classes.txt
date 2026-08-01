@@ -1,4 +1,0 @@
-EnumDescSample$Call
-EnumDescSample$Color
-EnumDescSample$Size
-EnumDescSample

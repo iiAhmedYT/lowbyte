@@ -83,6 +83,21 @@ public class ApiConversionSample {
         out.add("ofNullable.secondUse=" + attempt(() -> reused.count()));
         out.add("ofNullable.nullElement=" + Stream.of((String) null).count());
 
+        // Method references name their target in a bootstrap argument rather
+        // than in an instruction. Both rewrite kinds have to be reachable that
+        // way: an inline rebuild generates a helper for the handle to point at,
+        // and a runtime one points the handle at the injected utility.
+        java.util.function.Predicate<Optional<String>> isEmpty = Optional::isEmpty;
+        out.add("methodRef.optionalIsEmpty=" + isEmpty.test(Optional.empty())
+            + "," + isEmpty.test(Optional.of("x")));
+
+        java.util.function.Supplier<List<String>> emptyList = List::of;
+        out.add("methodRef.listOf=" + emptyList.get());
+        out.add("methodRef.listOfIsUnmodifiable=" + attempt(() -> emptyList.get().add("z")));
+
+        java.util.function.Function<String, String> strip = String::strip;
+        out.add("methodRef.strip=[" + strip.apply("  a  ") + "]");
+
         out.add("repeat=" + "ab".repeat(3));
         out.add("repeatZero=[" + "ab".repeat(0) + "]");
         out.add("repeatNegative=" + attempt(() -> "ab".repeat(-1)));
