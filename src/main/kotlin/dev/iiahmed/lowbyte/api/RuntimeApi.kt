@@ -7,7 +7,6 @@ import org.objectweb.asm.ClassWriter
 import org.objectweb.asm.Handle
 import org.objectweb.asm.MethodVisitor
 import org.objectweb.asm.Opcodes
-import org.objectweb.asm.Type
 import org.objectweb.asm.commons.ClassRemapper
 import org.objectweb.asm.commons.SimpleRemapper
 import java.security.MessageDigest
@@ -18,8 +17,13 @@ class RuntimeReplacement(
     val name: String,
     val descriptor: String,
     val introducedIn: Int,
-    val instance: Boolean,
-    /** The utility's own method, which takes the receiver first when [instance]. */
+    /**
+     * The utility's own method.
+     *
+     * Where the call it replaces is an instance method, the receiver is this
+     * method's first parameter, which is the order the operands are already in
+     * at the call site and the shape an unbound method reference wants.
+     */
     val method: String,
     val methodDescriptor: String
 ) {
@@ -198,7 +202,6 @@ object RuntimeApi {
                             name = values["name"] as? String ?: return,
                             descriptor = values["descriptor"] as? String ?: return,
                             introducedIn = values["introducedIn"] as? Int ?: return,
-                            instance = values["instance"] as? Boolean ?: false,
                             method = name.orEmpty(),
                             methodDescriptor = descriptor.orEmpty()
                         )
@@ -234,16 +237,4 @@ object RuntimeApi {
 
         override fun visitAnnotation(descriptor: String?, visible: Boolean): AnnotationVisitor? = null
     }
-
-    /** The descriptor a call site needs once the receiver becomes a parameter. */
-    fun callDescriptor(replacement: RuntimeReplacement): String =
-        if (!replacement.instance) {
-            replacement.descriptor
-        } else {
-            Type.getMethodDescriptor(
-                Type.getReturnType(replacement.descriptor),
-                Type.getObjectType(replacement.owner),
-                *Type.getArgumentTypes(replacement.descriptor)
-            )
-        }
 }

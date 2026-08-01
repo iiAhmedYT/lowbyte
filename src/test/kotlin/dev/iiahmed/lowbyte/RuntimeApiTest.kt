@@ -48,10 +48,10 @@ class RuntimeApiTest {
 
         val isBlank = byCall.getValue("java/lang/String.isBlank()Z")
         assertEquals(11, isBlank.introducedIn)
-        assertTrue(isBlank.instance)
         assertEquals("isBlank", isBlank.method)
-        // The receiver becomes the first parameter of the utility method.
-        assertEquals("(Ljava/lang/String;)Z", RuntimeApi.callDescriptor(isBlank))
+        // The receiver of an instance call becomes the first parameter of the
+        // utility method, which is what makes forwarding a swap of owner and
+        // opcode with nothing generated at the call site.
         assertEquals("(Ljava/lang/String;)Z", isBlank.methodDescriptor)
     }
 

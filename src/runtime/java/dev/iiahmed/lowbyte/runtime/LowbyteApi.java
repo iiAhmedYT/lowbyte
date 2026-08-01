@@ -36,7 +36,7 @@ public final class LowbyteApi {
      */
     @LowbyteInfo(
             owner = "java/lang/String", name = "isBlank",
-            descriptor = "()Z", introducedIn = 11, instance = true
+            descriptor = "()Z", introducedIn = 11
     )
     public static boolean isBlank(String value) {
         return value.codePoints().allMatch(Character::isWhitespace);
@@ -47,7 +47,7 @@ public final class LowbyteApi {
      */
     @LowbyteInfo(
             owner = "java/lang/String", name = "strip",
-            descriptor = "()Ljava/lang/String;", introducedIn = 11, instance = true
+            descriptor = "()Ljava/lang/String;", introducedIn = 11
     )
     public static String strip(String value) {
         int start = firstNonWhitespace(value);
@@ -62,7 +62,7 @@ public final class LowbyteApi {
      */
     @LowbyteInfo(
             owner = "java/lang/String", name = "stripLeading",
-            descriptor = "()Ljava/lang/String;", introducedIn = 11, instance = true
+            descriptor = "()Ljava/lang/String;", introducedIn = 11
     )
     public static String stripLeading(String value) {
         return value.substring(firstNonWhitespace(value));
@@ -73,7 +73,7 @@ public final class LowbyteApi {
      */
     @LowbyteInfo(
             owner = "java/lang/String", name = "stripTrailing",
-            descriptor = "()Ljava/lang/String;", introducedIn = 11, instance = true
+            descriptor = "()Ljava/lang/String;", introducedIn = 11
     )
     public static String stripTrailing(String value) {
         return value.substring(0, lastNonWhitespace(value));
@@ -101,7 +101,7 @@ public final class LowbyteApi {
      */
     @LowbyteInfo(
             owner = "java/lang/String", name = "repeat",
-            descriptor = "(I)Ljava/lang/String;", introducedIn = 11, instance = true
+            descriptor = "(I)Ljava/lang/String;", introducedIn = 11
     )
     public static String repeat(String value, int count) {
         if (count < 0) throw new IllegalArgumentException("count is negative: " + count);
@@ -119,7 +119,7 @@ public final class LowbyteApi {
      */
     @LowbyteInfo(
             owner = "java/lang/String", name = "lines",
-            descriptor = "()Ljava/util/stream/Stream;", introducedIn = 11, instance = true
+            descriptor = "()Ljava/util/stream/Stream;", introducedIn = 11
     )
     public static Stream<String> lines(String value) {
         return splitLines(value).stream();
@@ -153,7 +153,7 @@ public final class LowbyteApi {
      */
     @LowbyteInfo(
             owner = "java/lang/String", name = "indent",
-            descriptor = "(I)Ljava/lang/String;", introducedIn = 12, instance = true
+            descriptor = "(I)Ljava/lang/String;", introducedIn = 12
     )
     public static String indent(String value, int n) {
         if (value.isEmpty()) return "";
@@ -185,7 +185,7 @@ public final class LowbyteApi {
      */
     @LowbyteInfo(
             owner = "java/lang/String", name = "stripIndent",
-            descriptor = "()Ljava/lang/String;", introducedIn = 13, instance = true
+            descriptor = "()Ljava/lang/String;", introducedIn = 13
     )
     public static String stripIndent(String value) {
         int length = value.length();
@@ -233,7 +233,7 @@ public final class LowbyteApi {
     @LowbyteInfo(
             owner = "java/lang/String", name = "transform",
             descriptor = "(Ljava/util/function/Function;)Ljava/lang/Object;",
-            introducedIn = 12, instance = true
+            introducedIn = 12
     )
     public static <R> R transform(String value, Function<? super String, ? extends R> function) {
         return function.apply(value);
@@ -244,8 +244,8 @@ public final class LowbyteApi {
      * the receiver as the format, default locale and all.
      */
     @LowbyteInfo(
-            owner = "java/lang/String", name = "formatted", descriptor = "([Ljava/lang/Object;)Ljava/lang/String;",
-            introducedIn = 13, instance = true
+            owner = "java/lang/String", name = "formatted",
+            descriptor = "([Ljava/lang/Object;)Ljava/lang/String;", introducedIn = 13
     )
     public static String formatted(String value, Object... arguments) {
         return String.format(value, arguments);
@@ -256,8 +256,8 @@ public final class LowbyteApi {
      * which is not the set any of the older helpers cover.
      */
     @LowbyteInfo(
-            owner = "java/lang/String", name = "translateEscapes", descriptor = "()Ljava/lang/String;",
-            introducedIn = 13, instance = true
+            owner = "java/lang/String", name = "translateEscapes",
+            descriptor = "()Ljava/lang/String;", introducedIn = 13
     )
     public static String translateEscapes(String value) {
         if (value.isEmpty()) return "";

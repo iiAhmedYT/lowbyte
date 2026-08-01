@@ -29,7 +29,4 @@ public @interface LowbyteInfo {
 
     /** The release the call arrived in. Below this target, it is replaced. */
     int introducedIn();
-
-    /** True when the call is an instance method, so the receiver is the first parameter here. */
-    boolean instance() default false;
 }
