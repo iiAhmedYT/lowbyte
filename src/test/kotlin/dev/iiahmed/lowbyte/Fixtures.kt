@@ -44,7 +44,7 @@ object Fixtures {
     )
 
     /** Samples that only make sense with the opt-in API conversion turned on. */
-    val API_SAMPLES = listOf("ApiConversionSample", "RuntimeApiSample")
+    val API_SAMPLES = listOf("ApiConversionSample", "RuntimeApiSample", "ArraysSample")
 
     /**
      * Samples that exist but are deliberately not run by the differential test.

@@ -6,6 +6,10 @@ import org.objectweb.asm.Handle
 import org.objectweb.asm.MethodVisitor
 import org.objectweb.asm.Opcodes
 
+import dev.iiahmed.lowbyte.api.rewrite.ArraysCompareRewrite
+import dev.iiahmed.lowbyte.api.rewrite.ArraysCompareUnsignedRewrite
+import dev.iiahmed.lowbyte.api.rewrite.ArraysEqualsRewrite
+import dev.iiahmed.lowbyte.api.rewrite.ArraysMismatchRewrite
 import dev.iiahmed.lowbyte.api.rewrite.CollectorsToUnmodifiableListRewrite
 import dev.iiahmed.lowbyte.api.rewrite.CollectorsToUnmodifiableMapRewrite
 import dev.iiahmed.lowbyte.api.rewrite.CollectorsToUnmodifiableSetRewrite
@@ -91,6 +95,10 @@ object ApiRewrites {
         StringTransformRewrite,
         StringFormattedRewrite,
         StringTranslateEscapesRewrite,
+        ArraysMismatchRewrite,
+        ArraysEqualsRewrite,
+        ArraysCompareRewrite,
+        ArraysCompareUnsignedRewrite,
         RequireNonNullElseRewrite,
         ObjectsCheckIndexRewrite,
         ObjectsCheckFromToIndexRewrite,

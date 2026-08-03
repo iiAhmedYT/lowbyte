@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -554,6 +555,730 @@ public final class LowbyteApi {
                             + ") out of bounds for length " + length);
         }
         return fromIndex;
+    }
+
+    /**
+     * The bounds check every {@code Arrays} range form starts with.
+     * <p>
+     * The two exception types are not interchangeable and neither is their
+     * order. A reversed range is an {@code IllegalArgumentException}, anything
+     * else out of bounds is an {@code ArrayIndexOutOfBoundsException}, and the
+     * reversed test comes first, so {@code (-1, -1)} is out of bounds rather
+     * than reversed. The messages are the JDK's own wording.
+     */
+    private static void arraysRange(int length, int fromIndex, int toIndex) {
+        if (fromIndex > toIndex) {
+            throw new IllegalArgumentException("fromIndex(" + fromIndex + ") > toIndex(" + toIndex + ")");
+        }
+        if (fromIndex < 0) {
+            throw new ArrayIndexOutOfBoundsException(fromIndex);
+        }
+        if (toIndex > length) {
+            throw new ArrayIndexOutOfBoundsException(toIndex);
+        }
+    }
+
+    /**
+     * {@code Arrays.mismatch}, the first index at which two ranges differ.
+     * <p>
+     * Everything else here is built on it. {@code equals} is a mismatch of -1,
+     * and {@code compare} is a comparison at the mismatched index falling back to
+     * the difference in length, which is how the JDK writes them too.
+     * <p>
+     * The return is not simply an index: when one range is a prefix of the other
+     * it is the length of the shorter, which is out of bounds for that range.
+     * Only a mismatch strictly inside both ranges is an index, and the callers
+     * below test for that before indexing.
+     * <p>
+     * The short forms throw on a null array rather than treating it as ordered,
+     * which is where they part company with {@code compare}.
+     */
+    @LowbyteInfo(owner = "java/util/Arrays", name = "mismatch", descriptor = "([B[B)I", introducedIn = 9)
+    public static int arraysMismatch(byte[] a, byte[] b) {
+        return arraysMismatch(a, 0, a.length, b, 0, b.length);
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "mismatch", descriptor = "([BII[BII)I", introducedIn = 9)
+    public static int arraysMismatch(byte[] a, int aFrom, int aTo, byte[] b, int bFrom, int bTo) {
+        arraysRange(a.length, aFrom, aTo);
+        arraysRange(b.length, bFrom, bTo);
+        int aLength = aTo - aFrom;
+        int bLength = bTo - bFrom;
+        int length = Math.min(aLength, bLength);
+        for (int i = 0; i < length; i++) {
+            if (a[aFrom + i] != b[bFrom + i]) {
+                return i;
+            }
+        }
+        return aLength != bLength ? length : -1;
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "mismatch", descriptor = "([C[C)I", introducedIn = 9)
+    public static int arraysMismatch(char[] a, char[] b) {
+        return arraysMismatch(a, 0, a.length, b, 0, b.length);
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "mismatch", descriptor = "([CII[CII)I", introducedIn = 9)
+    public static int arraysMismatch(char[] a, int aFrom, int aTo, char[] b, int bFrom, int bTo) {
+        arraysRange(a.length, aFrom, aTo);
+        arraysRange(b.length, bFrom, bTo);
+        int aLength = aTo - aFrom;
+        int bLength = bTo - bFrom;
+        int length = Math.min(aLength, bLength);
+        for (int i = 0; i < length; i++) {
+            if (a[aFrom + i] != b[bFrom + i]) {
+                return i;
+            }
+        }
+        return aLength != bLength ? length : -1;
+    }
+
+    /**
+     * The floating point ranges compare by {@code Double.compare} rather than by
+     * {@code !=}, which is the whole difference between them and the integral
+     * ones. {@code !=} calls two NaNs different and 0.0 and -0.0 the same, and
+     * both of those are backwards from what these methods promise.
+     */
+    @LowbyteInfo(owner = "java/util/Arrays", name = "mismatch", descriptor = "([D[D)I", introducedIn = 9)
+    public static int arraysMismatch(double[] a, double[] b) {
+        return arraysMismatch(a, 0, a.length, b, 0, b.length);
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "mismatch", descriptor = "([DII[DII)I", introducedIn = 9)
+    public static int arraysMismatch(double[] a, int aFrom, int aTo, double[] b, int bFrom, int bTo) {
+        arraysRange(a.length, aFrom, aTo);
+        arraysRange(b.length, bFrom, bTo);
+        int aLength = aTo - aFrom;
+        int bLength = bTo - bFrom;
+        int length = Math.min(aLength, bLength);
+        for (int i = 0; i < length; i++) {
+            if (Double.compare(a[aFrom + i], b[bFrom + i]) != 0) {
+                return i;
+            }
+        }
+        return aLength != bLength ? length : -1;
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "mismatch", descriptor = "([F[F)I", introducedIn = 9)
+    public static int arraysMismatch(float[] a, float[] b) {
+        return arraysMismatch(a, 0, a.length, b, 0, b.length);
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "mismatch", descriptor = "([FII[FII)I", introducedIn = 9)
+    public static int arraysMismatch(float[] a, int aFrom, int aTo, float[] b, int bFrom, int bTo) {
+        arraysRange(a.length, aFrom, aTo);
+        arraysRange(b.length, bFrom, bTo);
+        int aLength = aTo - aFrom;
+        int bLength = bTo - bFrom;
+        int length = Math.min(aLength, bLength);
+        for (int i = 0; i < length; i++) {
+            if (Float.compare(a[aFrom + i], b[bFrom + i]) != 0) {
+                return i;
+            }
+        }
+        return aLength != bLength ? length : -1;
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "mismatch", descriptor = "([I[I)I", introducedIn = 9)
+    public static int arraysMismatch(int[] a, int[] b) {
+        return arraysMismatch(a, 0, a.length, b, 0, b.length);
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "mismatch", descriptor = "([III[III)I", introducedIn = 9)
+    public static int arraysMismatch(int[] a, int aFrom, int aTo, int[] b, int bFrom, int bTo) {
+        arraysRange(a.length, aFrom, aTo);
+        arraysRange(b.length, bFrom, bTo);
+        int aLength = aTo - aFrom;
+        int bLength = bTo - bFrom;
+        int length = Math.min(aLength, bLength);
+        for (int i = 0; i < length; i++) {
+            if (a[aFrom + i] != b[bFrom + i]) {
+                return i;
+            }
+        }
+        return aLength != bLength ? length : -1;
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "mismatch", descriptor = "([J[J)I", introducedIn = 9)
+    public static int arraysMismatch(long[] a, long[] b) {
+        return arraysMismatch(a, 0, a.length, b, 0, b.length);
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "mismatch", descriptor = "([JII[JII)I", introducedIn = 9)
+    public static int arraysMismatch(long[] a, int aFrom, int aTo, long[] b, int bFrom, int bTo) {
+        arraysRange(a.length, aFrom, aTo);
+        arraysRange(b.length, bFrom, bTo);
+        int aLength = aTo - aFrom;
+        int bLength = bTo - bFrom;
+        int length = Math.min(aLength, bLength);
+        for (int i = 0; i < length; i++) {
+            if (a[aFrom + i] != b[bFrom + i]) {
+                return i;
+            }
+        }
+        return aLength != bLength ? length : -1;
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "mismatch", descriptor = "([S[S)I", introducedIn = 9)
+    public static int arraysMismatch(short[] a, short[] b) {
+        return arraysMismatch(a, 0, a.length, b, 0, b.length);
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "mismatch", descriptor = "([SII[SII)I", introducedIn = 9)
+    public static int arraysMismatch(short[] a, int aFrom, int aTo, short[] b, int bFrom, int bTo) {
+        arraysRange(a.length, aFrom, aTo);
+        arraysRange(b.length, bFrom, bTo);
+        int aLength = aTo - aFrom;
+        int bLength = bTo - bFrom;
+        int length = Math.min(aLength, bLength);
+        for (int i = 0; i < length; i++) {
+            if (a[aFrom + i] != b[bFrom + i]) {
+                return i;
+            }
+        }
+        return aLength != bLength ? length : -1;
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "mismatch", descriptor = "([Z[Z)I", introducedIn = 9)
+    public static int arraysMismatch(boolean[] a, boolean[] b) {
+        return arraysMismatch(a, 0, a.length, b, 0, b.length);
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "mismatch", descriptor = "([ZII[ZII)I", introducedIn = 9)
+    public static int arraysMismatch(boolean[] a, int aFrom, int aTo, boolean[] b, int bFrom, int bTo) {
+        arraysRange(a.length, aFrom, aTo);
+        arraysRange(b.length, bFrom, bTo);
+        int aLength = aTo - aFrom;
+        int bLength = bTo - bFrom;
+        int length = Math.min(aLength, bLength);
+        for (int i = 0; i < length; i++) {
+            if (a[aFrom + i] != b[bFrom + i]) {
+                return i;
+            }
+        }
+        return aLength != bLength ? length : -1;
+    }
+
+    /** {@code Arrays.mismatch} over references, which is {@code Objects.equals} per element. */
+    @LowbyteInfo(owner = "java/util/Arrays", name = "mismatch",
+            descriptor = "([Ljava/lang/Object;[Ljava/lang/Object;)I", introducedIn = 9)
+    public static int arraysMismatch(Object[] a, Object[] b) {
+        return arraysMismatch(a, 0, a.length, b, 0, b.length);
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "mismatch",
+            descriptor = "([Ljava/lang/Object;II[Ljava/lang/Object;II)I", introducedIn = 9)
+    public static int arraysMismatch(Object[] a, int aFrom, int aTo, Object[] b, int bFrom, int bTo) {
+        arraysRange(a.length, aFrom, aTo);
+        arraysRange(b.length, bFrom, bTo);
+        int aLength = aTo - aFrom;
+        int bLength = bTo - bFrom;
+        int length = Math.min(aLength, bLength);
+        for (int i = 0; i < length; i++) {
+            if (!Objects.equals(a[aFrom + i], b[bFrom + i])) {
+                return i;
+            }
+        }
+        return aLength != bLength ? length : -1;
+    }
+
+    /**
+     * {@code Arrays.mismatch} under a comparator.
+     * <p>
+     * The comparator is checked before either array is touched, and it is not
+     * consulted about two identical references. That second part is observable
+     * with a comparator that counts its calls, and it is not shared with
+     * {@code equals}, which does ask about them.
+     */
+    @LowbyteInfo(owner = "java/util/Arrays", name = "mismatch",
+            descriptor = "([Ljava/lang/Object;[Ljava/lang/Object;Ljava/util/Comparator;)I", introducedIn = 9)
+    public static <T> int arraysMismatch(T[] a, T[] b, Comparator<? super T> cmp) {
+        Objects.requireNonNull(cmp);
+        return arraysMismatch(a, 0, a.length, b, 0, b.length, cmp);
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "mismatch",
+            descriptor = "([Ljava/lang/Object;II[Ljava/lang/Object;IILjava/util/Comparator;)I", introducedIn = 9)
+    public static <T> int arraysMismatch(T[] a, int aFrom, int aTo, T[] b, int bFrom, int bTo,
+                                         Comparator<? super T> cmp) {
+        Objects.requireNonNull(cmp);
+        arraysRange(a.length, aFrom, aTo);
+        arraysRange(b.length, bFrom, bTo);
+        int aLength = aTo - aFrom;
+        int bLength = bTo - bFrom;
+        int length = Math.min(aLength, bLength);
+        for (int i = 0; i < length; i++) {
+            T oa = a[aFrom + i];
+            T ob = b[bFrom + i];
+            if (oa != ob && cmp.compare(oa, ob) != 0) {
+                return i;
+            }
+        }
+        return aLength != bLength ? length : -1;
+    }
+
+    /**
+     * {@code Arrays.equals} over two ranges.
+     * <p>
+     * A mismatch of -1 is the whole of it: {@code mismatch} only returns -1 when
+     * the ranges agree element for element <em>and</em> are the same length, so
+     * there is nothing left to test. It also does the bounds checking, which has
+     * to happen even where the lengths differ and the answer is already known.
+     */
+    @LowbyteInfo(owner = "java/util/Arrays", name = "equals", descriptor = "([BII[BII)Z", introducedIn = 9)
+    public static boolean arraysEquals(byte[] a, int aFrom, int aTo, byte[] b, int bFrom, int bTo) {
+        return arraysMismatch(a, aFrom, aTo, b, bFrom, bTo) < 0;
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "equals", descriptor = "([CII[CII)Z", introducedIn = 9)
+    public static boolean arraysEquals(char[] a, int aFrom, int aTo, char[] b, int bFrom, int bTo) {
+        return arraysMismatch(a, aFrom, aTo, b, bFrom, bTo) < 0;
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "equals", descriptor = "([DII[DII)Z", introducedIn = 9)
+    public static boolean arraysEquals(double[] a, int aFrom, int aTo, double[] b, int bFrom, int bTo) {
+        return arraysMismatch(a, aFrom, aTo, b, bFrom, bTo) < 0;
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "equals", descriptor = "([FII[FII)Z", introducedIn = 9)
+    public static boolean arraysEquals(float[] a, int aFrom, int aTo, float[] b, int bFrom, int bTo) {
+        return arraysMismatch(a, aFrom, aTo, b, bFrom, bTo) < 0;
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "equals", descriptor = "([III[III)Z", introducedIn = 9)
+    public static boolean arraysEquals(int[] a, int aFrom, int aTo, int[] b, int bFrom, int bTo) {
+        return arraysMismatch(a, aFrom, aTo, b, bFrom, bTo) < 0;
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "equals", descriptor = "([JII[JII)Z", introducedIn = 9)
+    public static boolean arraysEquals(long[] a, int aFrom, int aTo, long[] b, int bFrom, int bTo) {
+        return arraysMismatch(a, aFrom, aTo, b, bFrom, bTo) < 0;
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "equals", descriptor = "([SII[SII)Z", introducedIn = 9)
+    public static boolean arraysEquals(short[] a, int aFrom, int aTo, short[] b, int bFrom, int bTo) {
+        return arraysMismatch(a, aFrom, aTo, b, bFrom, bTo) < 0;
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "equals", descriptor = "([ZII[ZII)Z", introducedIn = 9)
+    public static boolean arraysEquals(boolean[] a, int aFrom, int aTo, boolean[] b, int bFrom, int bTo) {
+        return arraysMismatch(a, aFrom, aTo, b, bFrom, bTo) < 0;
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "equals",
+            descriptor = "([Ljava/lang/Object;II[Ljava/lang/Object;II)Z", introducedIn = 9)
+    public static boolean arraysEquals(Object[] a, int aFrom, int aTo, Object[] b, int bFrom, int bTo) {
+        return arraysMismatch(a, aFrom, aTo, b, bFrom, bTo) < 0;
+    }
+
+    /**
+     * {@code Arrays.equals} under a comparator, which cannot go through
+     * {@code mismatch}.
+     * <p>
+     * {@code mismatch} skips the comparator for two identical references and
+     * this does not, so a comparator that counts its calls can tell the two
+     * apart. The whole-array shortcut below is the JDK's and is kept for the
+     * same reason: with it, comparing an array to itself asks nothing.
+     */
+    @LowbyteInfo(owner = "java/util/Arrays", name = "equals",
+            descriptor = "([Ljava/lang/Object;[Ljava/lang/Object;Ljava/util/Comparator;)Z", introducedIn = 9)
+    public static <T> boolean arraysEquals(T[] a, T[] b, Comparator<? super T> cmp) {
+        Objects.requireNonNull(cmp);
+        if (a == b) {
+            return true;
+        }
+        if (a == null || b == null || a.length != b.length) {
+            return false;
+        }
+        return arraysEquals(a, 0, a.length, b, 0, b.length, cmp);
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "equals",
+            descriptor = "([Ljava/lang/Object;II[Ljava/lang/Object;IILjava/util/Comparator;)Z", introducedIn = 9)
+    public static <T> boolean arraysEquals(T[] a, int aFrom, int aTo, T[] b, int bFrom, int bTo,
+                                           Comparator<? super T> cmp) {
+        Objects.requireNonNull(cmp);
+        arraysRange(a.length, aFrom, aTo);
+        arraysRange(b.length, bFrom, bTo);
+        int aLength = aTo - aFrom;
+        if (aLength != bTo - bFrom) {
+            return false;
+        }
+        for (int i = 0; i < aLength; i++) {
+            if (cmp.compare(a[aFrom + i], b[bFrom + i]) != 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * {@code Arrays.compare}, lexicographic and total.
+     * <p>
+     * The short forms order null before any array and call two nulls equal,
+     * which is the one place these are friendlier than {@code mismatch}. Past
+     * that they are the mismatch index compared, or the difference in length
+     * when one range is a prefix of the other.
+     * <p>
+     * The result is the raw difference where the JDK's is, so
+     * {@code compare(new int[7], new int[2])} is 5 rather than 1, and a byte
+     * comparison is a subtraction rather than a sign. Callers are documented to
+     * look at the sign, but the exact value is observable and free to keep.
+     */
+    @LowbyteInfo(owner = "java/util/Arrays", name = "compare", descriptor = "([B[B)I", introducedIn = 9)
+    public static int arraysCompare(byte[] a, byte[] b) {
+        if (a == b) {
+            return 0;
+        }
+        if (a == null || b == null) {
+            return a == null ? -1 : 1;
+        }
+        return arraysCompare(a, 0, a.length, b, 0, b.length);
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "compare", descriptor = "([BII[BII)I", introducedIn = 9)
+    public static int arraysCompare(byte[] a, int aFrom, int aTo, byte[] b, int bFrom, int bTo) {
+        int i = arraysMismatch(a, aFrom, aTo, b, bFrom, bTo);
+        int aLength = aTo - aFrom;
+        int bLength = bTo - bFrom;
+        if (i >= 0 && i < Math.min(aLength, bLength)) {
+            return Byte.compare(a[aFrom + i], b[bFrom + i]);
+        }
+        return aLength - bLength;
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "compare", descriptor = "([C[C)I", introducedIn = 9)
+    public static int arraysCompare(char[] a, char[] b) {
+        if (a == b) {
+            return 0;
+        }
+        if (a == null || b == null) {
+            return a == null ? -1 : 1;
+        }
+        return arraysCompare(a, 0, a.length, b, 0, b.length);
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "compare", descriptor = "([CII[CII)I", introducedIn = 9)
+    public static int arraysCompare(char[] a, int aFrom, int aTo, char[] b, int bFrom, int bTo) {
+        int i = arraysMismatch(a, aFrom, aTo, b, bFrom, bTo);
+        int aLength = aTo - aFrom;
+        int bLength = bTo - bFrom;
+        if (i >= 0 && i < Math.min(aLength, bLength)) {
+            return Character.compare(a[aFrom + i], b[bFrom + i]);
+        }
+        return aLength - bLength;
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "compare", descriptor = "([D[D)I", introducedIn = 9)
+    public static int arraysCompare(double[] a, double[] b) {
+        if (a == b) {
+            return 0;
+        }
+        if (a == null || b == null) {
+            return a == null ? -1 : 1;
+        }
+        return arraysCompare(a, 0, a.length, b, 0, b.length);
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "compare", descriptor = "([DII[DII)I", introducedIn = 9)
+    public static int arraysCompare(double[] a, int aFrom, int aTo, double[] b, int bFrom, int bTo) {
+        int i = arraysMismatch(a, aFrom, aTo, b, bFrom, bTo);
+        int aLength = aTo - aFrom;
+        int bLength = bTo - bFrom;
+        if (i >= 0 && i < Math.min(aLength, bLength)) {
+            return Double.compare(a[aFrom + i], b[bFrom + i]);
+        }
+        return aLength - bLength;
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "compare", descriptor = "([F[F)I", introducedIn = 9)
+    public static int arraysCompare(float[] a, float[] b) {
+        if (a == b) {
+            return 0;
+        }
+        if (a == null || b == null) {
+            return a == null ? -1 : 1;
+        }
+        return arraysCompare(a, 0, a.length, b, 0, b.length);
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "compare", descriptor = "([FII[FII)I", introducedIn = 9)
+    public static int arraysCompare(float[] a, int aFrom, int aTo, float[] b, int bFrom, int bTo) {
+        int i = arraysMismatch(a, aFrom, aTo, b, bFrom, bTo);
+        int aLength = aTo - aFrom;
+        int bLength = bTo - bFrom;
+        if (i >= 0 && i < Math.min(aLength, bLength)) {
+            return Float.compare(a[aFrom + i], b[bFrom + i]);
+        }
+        return aLength - bLength;
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "compare", descriptor = "([I[I)I", introducedIn = 9)
+    public static int arraysCompare(int[] a, int[] b) {
+        if (a == b) {
+            return 0;
+        }
+        if (a == null || b == null) {
+            return a == null ? -1 : 1;
+        }
+        return arraysCompare(a, 0, a.length, b, 0, b.length);
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "compare", descriptor = "([III[III)I", introducedIn = 9)
+    public static int arraysCompare(int[] a, int aFrom, int aTo, int[] b, int bFrom, int bTo) {
+        int i = arraysMismatch(a, aFrom, aTo, b, bFrom, bTo);
+        int aLength = aTo - aFrom;
+        int bLength = bTo - bFrom;
+        if (i >= 0 && i < Math.min(aLength, bLength)) {
+            return Integer.compare(a[aFrom + i], b[bFrom + i]);
+        }
+        return aLength - bLength;
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "compare", descriptor = "([J[J)I", introducedIn = 9)
+    public static int arraysCompare(long[] a, long[] b) {
+        if (a == b) {
+            return 0;
+        }
+        if (a == null || b == null) {
+            return a == null ? -1 : 1;
+        }
+        return arraysCompare(a, 0, a.length, b, 0, b.length);
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "compare", descriptor = "([JII[JII)I", introducedIn = 9)
+    public static int arraysCompare(long[] a, int aFrom, int aTo, long[] b, int bFrom, int bTo) {
+        int i = arraysMismatch(a, aFrom, aTo, b, bFrom, bTo);
+        int aLength = aTo - aFrom;
+        int bLength = bTo - bFrom;
+        if (i >= 0 && i < Math.min(aLength, bLength)) {
+            return Long.compare(a[aFrom + i], b[bFrom + i]);
+        }
+        return aLength - bLength;
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "compare", descriptor = "([S[S)I", introducedIn = 9)
+    public static int arraysCompare(short[] a, short[] b) {
+        if (a == b) {
+            return 0;
+        }
+        if (a == null || b == null) {
+            return a == null ? -1 : 1;
+        }
+        return arraysCompare(a, 0, a.length, b, 0, b.length);
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "compare", descriptor = "([SII[SII)I", introducedIn = 9)
+    public static int arraysCompare(short[] a, int aFrom, int aTo, short[] b, int bFrom, int bTo) {
+        int i = arraysMismatch(a, aFrom, aTo, b, bFrom, bTo);
+        int aLength = aTo - aFrom;
+        int bLength = bTo - bFrom;
+        if (i >= 0 && i < Math.min(aLength, bLength)) {
+            return Short.compare(a[aFrom + i], b[bFrom + i]);
+        }
+        return aLength - bLength;
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "compare", descriptor = "([Z[Z)I", introducedIn = 9)
+    public static int arraysCompare(boolean[] a, boolean[] b) {
+        if (a == b) {
+            return 0;
+        }
+        if (a == null || b == null) {
+            return a == null ? -1 : 1;
+        }
+        return arraysCompare(a, 0, a.length, b, 0, b.length);
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "compare", descriptor = "([ZII[ZII)I", introducedIn = 9)
+    public static int arraysCompare(boolean[] a, int aFrom, int aTo, boolean[] b, int bFrom, int bTo) {
+        int i = arraysMismatch(a, aFrom, aTo, b, bFrom, bTo);
+        int aLength = aTo - aFrom;
+        int bLength = bTo - bFrom;
+        if (i >= 0 && i < Math.min(aLength, bLength)) {
+            return Boolean.compare(a[aFrom + i], b[bFrom + i]);
+        }
+        return aLength - bLength;
+    }
+
+    /**
+     * {@code Arrays.compare} over {@code Comparable} elements.
+     * <p>
+     * Null-friendly inside the arrays as well as outside them: a null element
+     * sorts before a non-null one and two nulls are equal, so this orders arrays
+     * that {@code compareTo} on its own would throw on.
+     */
+    @LowbyteInfo(owner = "java/util/Arrays", name = "compare",
+            descriptor = "([Ljava/lang/Comparable;[Ljava/lang/Comparable;)I", introducedIn = 9)
+    public static <T extends Comparable<? super T>> int arraysCompare(T[] a, T[] b) {
+        if (a == b) {
+            return 0;
+        }
+        if (a == null || b == null) {
+            return a == null ? -1 : 1;
+        }
+        return arraysCompare(a, 0, a.length, b, 0, b.length);
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "compare",
+            descriptor = "([Ljava/lang/Comparable;II[Ljava/lang/Comparable;II)I", introducedIn = 9)
+    public static <T extends Comparable<? super T>> int arraysCompare(T[] a, int aFrom, int aTo,
+                                                                      T[] b, int bFrom, int bTo) {
+        arraysRange(a.length, aFrom, aTo);
+        arraysRange(b.length, bFrom, bTo);
+        int aLength = aTo - aFrom;
+        int bLength = bTo - bFrom;
+        int length = Math.min(aLength, bLength);
+        for (int i = 0; i < length; i++) {
+            T oa = a[aFrom + i];
+            T ob = b[bFrom + i];
+            if (oa != ob) {
+                if (oa == null || ob == null) {
+                    return oa == null ? -1 : 1;
+                }
+                int v = oa.compareTo(ob);
+                if (v != 0) {
+                    return v;
+                }
+            }
+        }
+        return aLength - bLength;
+    }
+
+    /** {@code Arrays.compare} under a comparator, which decides about nulls itself. */
+    @LowbyteInfo(owner = "java/util/Arrays", name = "compare",
+            descriptor = "([Ljava/lang/Object;[Ljava/lang/Object;Ljava/util/Comparator;)I", introducedIn = 9)
+    public static <T> int arraysCompare(T[] a, T[] b, Comparator<? super T> cmp) {
+        Objects.requireNonNull(cmp);
+        if (a == b) {
+            return 0;
+        }
+        if (a == null || b == null) {
+            return a == null ? -1 : 1;
+        }
+        return arraysCompare(a, 0, a.length, b, 0, b.length, cmp);
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "compare",
+            descriptor = "([Ljava/lang/Object;II[Ljava/lang/Object;IILjava/util/Comparator;)I", introducedIn = 9)
+    public static <T> int arraysCompare(T[] a, int aFrom, int aTo, T[] b, int bFrom, int bTo,
+                                        Comparator<? super T> cmp) {
+        Objects.requireNonNull(cmp);
+        arraysRange(a.length, aFrom, aTo);
+        arraysRange(b.length, bFrom, bTo);
+        int aLength = aTo - aFrom;
+        int bLength = bTo - bFrom;
+        int length = Math.min(aLength, bLength);
+        for (int i = 0; i < length; i++) {
+            T oa = a[aFrom + i];
+            T ob = b[bFrom + i];
+            if (oa != ob) {
+                int v = cmp.compare(oa, ob);
+                if (v != 0) {
+                    return v;
+                }
+            }
+        }
+        return aLength - bLength;
+    }
+
+    /**
+     * {@code Arrays.compareUnsigned}.
+     * <p>
+     * Which index differs does not depend on signedness, so this is the same
+     * mismatch with a different comparison at the end.
+     * <p>
+     * {@code Byte.compareUnsigned} and {@code Short.compareUnsigned} arrived
+     * alongside these methods and so cannot be called here. Widening and
+     * subtracting is what they do anyway, and it matters that it is a
+     * subtraction: the JDK returns 254 for -1 against 1, not 1.
+     */
+    @LowbyteInfo(owner = "java/util/Arrays", name = "compareUnsigned", descriptor = "([B[B)I", introducedIn = 9)
+    public static int arraysCompareUnsigned(byte[] a, byte[] b) {
+        if (a == b) {
+            return 0;
+        }
+        if (a == null || b == null) {
+            return a == null ? -1 : 1;
+        }
+        return arraysCompareUnsigned(a, 0, a.length, b, 0, b.length);
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "compareUnsigned", descriptor = "([BII[BII)I", introducedIn = 9)
+    public static int arraysCompareUnsigned(byte[] a, int aFrom, int aTo, byte[] b, int bFrom, int bTo) {
+        int i = arraysMismatch(a, aFrom, aTo, b, bFrom, bTo);
+        int aLength = aTo - aFrom;
+        int bLength = bTo - bFrom;
+        if (i >= 0 && i < Math.min(aLength, bLength)) {
+            return (a[aFrom + i] & 0xFF) - (b[bFrom + i] & 0xFF);
+        }
+        return aLength - bLength;
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "compareUnsigned", descriptor = "([S[S)I", introducedIn = 9)
+    public static int arraysCompareUnsigned(short[] a, short[] b) {
+        if (a == b) {
+            return 0;
+        }
+        if (a == null || b == null) {
+            return a == null ? -1 : 1;
+        }
+        return arraysCompareUnsigned(a, 0, a.length, b, 0, b.length);
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "compareUnsigned", descriptor = "([SII[SII)I", introducedIn = 9)
+    public static int arraysCompareUnsigned(short[] a, int aFrom, int aTo, short[] b, int bFrom, int bTo) {
+        int i = arraysMismatch(a, aFrom, aTo, b, bFrom, bTo);
+        int aLength = aTo - aFrom;
+        int bLength = bTo - bFrom;
+        if (i >= 0 && i < Math.min(aLength, bLength)) {
+            return (a[aFrom + i] & 0xFFFF) - (b[bFrom + i] & 0xFFFF);
+        }
+        return aLength - bLength;
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "compareUnsigned", descriptor = "([I[I)I", introducedIn = 9)
+    public static int arraysCompareUnsigned(int[] a, int[] b) {
+        if (a == b) {
+            return 0;
+        }
+        if (a == null || b == null) {
+            return a == null ? -1 : 1;
+        }
+        return arraysCompareUnsigned(a, 0, a.length, b, 0, b.length);
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "compareUnsigned", descriptor = "([III[III)I", introducedIn = 9)
+    public static int arraysCompareUnsigned(int[] a, int aFrom, int aTo, int[] b, int bFrom, int bTo) {
+        int i = arraysMismatch(a, aFrom, aTo, b, bFrom, bTo);
+        int aLength = aTo - aFrom;
+        int bLength = bTo - bFrom;
+        if (i >= 0 && i < Math.min(aLength, bLength)) {
+            return Integer.compareUnsigned(a[aFrom + i], b[bFrom + i]);
+        }
+        return aLength - bLength;
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "compareUnsigned", descriptor = "([J[J)I", introducedIn = 9)
+    public static int arraysCompareUnsigned(long[] a, long[] b) {
+        if (a == b) {
+            return 0;
+        }
+        if (a == null || b == null) {
+            return a == null ? -1 : 1;
+        }
+        return arraysCompareUnsigned(a, 0, a.length, b, 0, b.length);
+    }
+
+    @LowbyteInfo(owner = "java/util/Arrays", name = "compareUnsigned", descriptor = "([JII[JII)I", introducedIn = 9)
+    public static int arraysCompareUnsigned(long[] a, int aFrom, int aTo, long[] b, int bFrom, int bTo) {
+        int i = arraysMismatch(a, aFrom, aTo, b, bFrom, bTo);
+        int aLength = aTo - aFrom;
+        int bLength = bTo - bFrom;
+        if (i >= 0 && i < Math.min(aLength, bLength)) {
+            return Long.compareUnsigned(a[aFrom + i], b[bFrom + i]);
+        }
+        return aLength - bLength;
     }
 
     /**

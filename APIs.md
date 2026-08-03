@@ -107,6 +107,34 @@ copied into that jar and the call site is pointed at it.
 | `Files.writeString`             | 11    | the same going out, so an unmappable character throws                   |
 | `Files.mismatch`                | 12    | a block-at-a-time comparison, so a loop                                 |
 | `Reader.transferTo`             | 10    | a loop over `read` and `write`, returning the count                     |
+| `Arrays.mismatch`               | 9     | twenty overloads, and a loop over two ranges is the whole of it         |
+| `Arrays.equals`                 | 9     | the range forms and the two comparator ones, eleven in all              |
+| `Arrays.compare`                | 9     | twenty more, since Java 8 orders no array at all                        |
+| `Arrays.compareUnsigned`        | 9     | eight, the four integral types in both forms                            |
+
+**The `Arrays` comparisons are fifty-nine overloads of four ideas.** Every one is built on
+`mismatch`: `equals` is a mismatch of -1, and `compare` is a comparison at the mismatched
+index falling back to the difference in length. That is how the JDK writes them too, and it
+means one loop per element type carries the rest.
+
+Three details are easy to get wrong and are checked by the fixture rather than argued about:
+
+- `mismatch` does not return an index when one range is a prefix of the other. It returns
+  the length of the shorter, which is out of bounds for that range, so `compare` tests for
+  a mismatch strictly inside both ranges before indexing.
+- The floating point overloads go by `Double.compare`, not `!=`. `!=` calls two NaNs
+  different and 0.0 and -0.0 the same, and both are backwards from what these promise.
+- `equals` under a comparator consults it about two identical references and `mismatch`
+  does not. A comparator that counts its calls can tell, so `equals` cannot be written in
+  terms of `mismatch` the way the others are.
+
+`Byte.compareUnsigned` and `Short.compareUnsigned` arrived alongside these methods, so
+`compareUnsigned` widens and subtracts instead. That it is a subtraction matters: the JDK
+returns 254 comparing -1 against 1, not 1.
+
+Only the *range* forms of `equals` are here. Java 8 already compares two whole primitive
+arrays, so there is nothing to replace there; what Java 9 added is comparing two ranges,
+which the older `equals` cannot express without copying.
 
 **The bounds checks return their index**, so they read inside an expression rather than
 above one, and all three throw `IndexOutOfBoundsException`. Only the message tells them

@@ -1,0 +1,436 @@
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.List;
+
+/**
+ * The `Arrays` comparison methods Java 9 added, all fifty-nine overloads.
+ *
+ * Every overload is called at least once, and that is the point of the sample
+ * rather than a side effect of being thorough. A rewrite is matched on its exact
+ * descriptor, so one wrong character means the call is not rewritten at all and
+ * dies on Java 8 with a `NoSuchMethodError`. Only calling it says otherwise.
+ *
+ * Past that the cases are the ones where a plausible implementation and the real
+ * one part company: a prefix, an empty range, NaN, -0.0, an unsigned byte, a
+ * null array, a reversed range, and a comparator counting how often it is asked.
+ */
+public class ArraysSample {
+
+    private interface Call {
+        Object run();
+    }
+
+    /**
+     * The value, or what was thrown trying to get it.
+     *
+     * A null pointer keeps only its type: the message naming the variable is a
+     * Java 14 feature, so it cannot survive a downgrade and is not supposed to.
+     * The other two carry their message, which is wording we owe the caller.
+     */
+    private static String attempt(Call call) {
+        try {
+            return String.valueOf(call.run());
+        } catch (NullPointerException e) {
+            return "NullPointerException";
+        } catch (Throwable t) {
+            return t.getClass().getSimpleName() + "(" + t.getMessage() + ")";
+        }
+    }
+
+    private static void bytes(List<String> out) {
+        final byte[] empty = {};
+        final byte[] a = { 1, 2, 3 };
+        final byte[] b = { 1, 2, 3 };
+        final byte[] c = { 1, 2, 4 };
+        final byte[] prefix = { 1, 2 };
+        final byte[] minus = { -1 };
+        final byte[] one = { 1 };
+
+        out.add("byte mismatch(a,b)=" + Arrays.mismatch(a, b));
+        out.add("byte mismatch(a,c)=" + Arrays.mismatch(a, c));
+        out.add("byte mismatch(a,prefix)=" + Arrays.mismatch(a, prefix));
+        out.add("byte mismatch(empty,empty)=" + Arrays.mismatch(empty, empty));
+        out.add("byte mismatch(a,1,3,c,1,3)=" + Arrays.mismatch(a, 1, 3, c, 1, 3));
+        out.add("byte mismatch(a,0,2,c,0,3)=" + Arrays.mismatch(a, 0, 2, c, 0, 3));
+        out.add("byte mismatch(a,2,2,c,1,1)=" + Arrays.mismatch(a, 2, 2, c, 1, 1));
+        out.add("byte equals(a,0,3,b,0,3)=" + Arrays.equals(a, 0, 3, b, 0, 3));
+        out.add("byte equals(a,0,3,c,0,3)=" + Arrays.equals(a, 0, 3, c, 0, 3));
+        out.add("byte equals(a,0,2,prefix,0,2)=" + Arrays.equals(a, 0, 2, prefix, 0, 2));
+        out.add("byte equals(a,0,3,prefix,0,2)=" + Arrays.equals(a, 0, 3, prefix, 0, 2));
+        out.add("byte compare(a,b)=" + Arrays.compare(a, b));
+        out.add("byte compare(a,c)=" + Arrays.compare(a, c));
+        out.add("byte compare(a,prefix)=" + Arrays.compare(a, prefix));
+        out.add("byte compare(null,null)=" + Arrays.compare((byte[]) null, (byte[]) null));
+        out.add("byte compare(null,a)=" + Arrays.compare((byte[]) null, a));
+        out.add("byte compare(a,null)=" + Arrays.compare(a, (byte[]) null));
+        out.add("byte compare(minus,one)=" + Arrays.compare(minus, one));
+        out.add("byte compare(a,1,3,c,1,3)=" + Arrays.compare(a, 1, 3, c, 1, 3));
+        out.add("byte compare(a,0,3,prefix,0,2)=" + Arrays.compare(a, 0, 3, prefix, 0, 2));
+        out.add("byte compareUnsigned(minus,one)=" + Arrays.compareUnsigned(minus, one));
+        out.add("byte compareUnsigned(a,b)=" + Arrays.compareUnsigned(a, b));
+        out.add("byte compareUnsigned(null,null)=" + Arrays.compareUnsigned((byte[]) null, (byte[]) null));
+        out.add("byte compareUnsigned(a,null)=" + Arrays.compareUnsigned(a, (byte[]) null));
+        out.add("byte compareUnsigned(minus,0,1,one,0,1)=" + Arrays.compareUnsigned(minus, 0, 1, one, 0, 1));
+        out.add("byte compareUnsigned(a,0,3,prefix,0,2)=" + Arrays.compareUnsigned(a, 0, 3, prefix, 0, 2));
+    }
+
+    private static void chars(List<String> out) {
+        final char[] a = { 'a', 'b', 'c' };
+        final char[] b = { 'a', 'b', 'c' };
+        final char[] z = { 'a', 'b', 'z' };
+        final char[] prefix = { 'a', 'b' };
+
+        out.add("char mismatch(a,b)=" + Arrays.mismatch(a, b));
+        out.add("char mismatch(a,z)=" + Arrays.mismatch(a, z));
+        out.add("char mismatch(a,prefix)=" + Arrays.mismatch(a, prefix));
+        out.add("char mismatch(a,1,3,z,1,3)=" + Arrays.mismatch(a, 1, 3, z, 1, 3));
+        out.add("char equals(a,0,3,b,0,3)=" + Arrays.equals(a, 0, 3, b, 0, 3));
+        out.add("char equals(a,0,3,z,0,3)=" + Arrays.equals(a, 0, 3, z, 0, 3));
+        out.add("char compare(a,b)=" + Arrays.compare(a, b));
+        out.add("char compare(a,z)=" + Arrays.compare(a, z));
+        out.add("char compare(a,prefix)=" + Arrays.compare(a, prefix));
+        out.add("char compare(null,null)=" + Arrays.compare((char[]) null, (char[]) null));
+        out.add("char compare(a,null)=" + Arrays.compare(a, (char[]) null));
+        out.add("char compare(a,2,3,z,2,3)=" + Arrays.compare(a, 2, 3, z, 2, 3));
+    }
+
+    private static void doubles(List<String> out) {
+        final double[] a = { 1.0, 2.0 };
+        final double[] b = { 1.0, 2.0 };
+        final double[] nan = { Double.NaN };
+        final double[] nan2 = { Double.NaN };
+        final double[] zero = { 0.0 };
+        final double[] minusZero = { -0.0 };
+
+        out.add("double mismatch(a,b)=" + Arrays.mismatch(a, b));
+        out.add("double mismatch(nan,nan2)=" + Arrays.mismatch(nan, nan2));
+        out.add("double mismatch(zero,minusZero)=" + Arrays.mismatch(zero, minusZero));
+        out.add("double mismatch(nan,0,1,nan2,0,1)=" + Arrays.mismatch(nan, 0, 1, nan2, 0, 1));
+        out.add("double mismatch(zero,0,1,minusZero,0,1)=" + Arrays.mismatch(zero, 0, 1, minusZero, 0, 1));
+        out.add("double equals(nan,0,1,nan2,0,1)=" + Arrays.equals(nan, 0, 1, nan2, 0, 1));
+        out.add("double equals(zero,0,1,minusZero,0,1)=" + Arrays.equals(zero, 0, 1, minusZero, 0, 1));
+        out.add("double compare(nan,nan2)=" + Arrays.compare(nan, nan2));
+        out.add("double compare(zero,minusZero)=" + Arrays.compare(zero, minusZero));
+        out.add("double compare(minusZero,zero)=" + Arrays.compare(minusZero, zero));
+        out.add("double compare(null,null)=" + Arrays.compare((double[]) null, (double[]) null));
+        out.add("double compare(a,null)=" + Arrays.compare(a, (double[]) null));
+        out.add("double compare(zero,0,1,minusZero,0,1)=" + Arrays.compare(zero, 0, 1, minusZero, 0, 1));
+    }
+
+    private static void floats(List<String> out) {
+        final float[] a = { 1.0f, 2.0f };
+        final float[] b = { 1.0f, 2.0f };
+        final float[] nan = { Float.NaN };
+        final float[] nan2 = { Float.NaN };
+        final float[] zero = { 0.0f };
+        final float[] minusZero = { -0.0f };
+
+        out.add("float mismatch(a,b)=" + Arrays.mismatch(a, b));
+        out.add("float mismatch(nan,nan2)=" + Arrays.mismatch(nan, nan2));
+        out.add("float mismatch(zero,minusZero)=" + Arrays.mismatch(zero, minusZero));
+        out.add("float mismatch(nan,0,1,nan2,0,1)=" + Arrays.mismatch(nan, 0, 1, nan2, 0, 1));
+        out.add("float equals(nan,0,1,nan2,0,1)=" + Arrays.equals(nan, 0, 1, nan2, 0, 1));
+        out.add("float equals(zero,0,1,minusZero,0,1)=" + Arrays.equals(zero, 0, 1, minusZero, 0, 1));
+        out.add("float compare(nan,nan2)=" + Arrays.compare(nan, nan2));
+        out.add("float compare(zero,minusZero)=" + Arrays.compare(zero, minusZero));
+        out.add("float compare(null,null)=" + Arrays.compare((float[]) null, (float[]) null));
+        out.add("float compare(a,null)=" + Arrays.compare(a, (float[]) null));
+        out.add("float compare(zero,0,1,minusZero,0,1)=" + Arrays.compare(zero, 0, 1, minusZero, 0, 1));
+    }
+
+    private static void ints(List<String> out) {
+        final int[] empty = {};
+        final int[] a = { 1, 2, 3 };
+        final int[] b = { 1, 2, 3 };
+        final int[] c = { 1, 2, 4 };
+        final int[] prefix = { 1, 2 };
+        final int[] minus = { -1 };
+        final int[] one = { 1 };
+        final int[] seven = new int[7];
+        final int[] two = new int[2];
+
+        out.add("int mismatch(a,b)=" + Arrays.mismatch(a, b));
+        out.add("int mismatch(a,c)=" + Arrays.mismatch(a, c));
+        out.add("int mismatch(a,prefix)=" + Arrays.mismatch(a, prefix));
+        out.add("int mismatch(empty,empty)=" + Arrays.mismatch(empty, empty));
+        out.add("int mismatch(a,1,3,c,1,3)=" + Arrays.mismatch(a, 1, 3, c, 1, 3));
+        out.add("int equals(a,0,3,b,0,3)=" + Arrays.equals(a, 0, 3, b, 0, 3));
+        out.add("int equals(a,0,3,c,0,3)=" + Arrays.equals(a, 0, 3, c, 0, 3));
+        out.add("int equals(a,1,1,c,2,2)=" + Arrays.equals(a, 1, 1, c, 2, 2));
+        out.add("int compare(a,b)=" + Arrays.compare(a, b));
+        out.add("int compare(a,c)=" + Arrays.compare(a, c));
+        out.add("int compare(seven,two)=" + Arrays.compare(seven, two));
+        out.add("int compare(empty,two)=" + Arrays.compare(empty, two));
+        out.add("int compare(null,null)=" + Arrays.compare((int[]) null, (int[]) null));
+        out.add("int compare(null,empty)=" + Arrays.compare((int[]) null, empty));
+        out.add("int compare(a,1,3,c,1,3)=" + Arrays.compare(a, 1, 3, c, 1, 3));
+        out.add("int compareUnsigned(minus,one)=" + Arrays.compareUnsigned(minus, one));
+        out.add("int compareUnsigned(one,minus)=" + Arrays.compareUnsigned(one, minus));
+        out.add("int compareUnsigned(null,null)=" + Arrays.compareUnsigned((int[]) null, (int[]) null));
+        out.add("int compareUnsigned(minus,0,1,one,0,1)=" + Arrays.compareUnsigned(minus, 0, 1, one, 0, 1));
+
+        // The shared bounds check, and the order it applies its two exceptions.
+        out.add("int mismatch(a,2,1,..)=" + attempt(new Call() {
+            public Object run() { return Arrays.mismatch(a, 2, 1, c, 0, 3); }
+        }));
+        out.add("int mismatch(a,-1,3,..)=" + attempt(new Call() {
+            public Object run() { return Arrays.mismatch(a, -1, 3, c, 0, 3); }
+        }));
+        out.add("int mismatch(a,0,9,..)=" + attempt(new Call() {
+            public Object run() { return Arrays.mismatch(a, 0, 9, c, 0, 3); }
+        }));
+        out.add("int mismatch(a,-1,-1,..)=" + attempt(new Call() {
+            public Object run() { return Arrays.mismatch(a, -1, -1, c, 0, 3); }
+        }));
+        // Negative and reversed at once, which is the only case that says which
+        // of the two checks runs first.
+        out.add("int mismatch(a,-1,-2,..)=" + attempt(new Call() {
+            public Object run() { return Arrays.mismatch(a, -1, -2, c, 0, 3); }
+        }));
+        out.add("int mismatch(a,0,3,c,0,9)=" + attempt(new Call() {
+            public Object run() { return Arrays.mismatch(a, 0, 3, c, 0, 9); }
+        }));
+        out.add("int mismatch(null,null)=" + attempt(new Call() {
+            public Object run() { return Arrays.mismatch((int[]) null, (int[]) null); }
+        }));
+        // Checked even where the differing lengths already settle the answer.
+        out.add("int equals(a,0,3,c,0,9)=" + attempt(new Call() {
+            public Object run() { return Arrays.equals(a, 0, 3, c, 0, 9); }
+        }));
+        out.add("int compare(a,0,9,c,0,3)=" + attempt(new Call() {
+            public Object run() { return Arrays.compare(a, 0, 9, c, 0, 3); }
+        }));
+        out.add("int compareUnsigned(a,0,9,c,0,3)=" + attempt(new Call() {
+            public Object run() { return Arrays.compareUnsigned(a, 0, 9, c, 0, 3); }
+        }));
+    }
+
+    private static void longs(List<String> out) {
+        final long[] a = { 1L, 2L, 3L };
+        final long[] b = { 1L, 2L, 3L };
+        final long[] c = { 1L, 2L, 4L };
+        final long[] prefix = { 1L, 2L };
+        final long[] minus = { -1L };
+        final long[] one = { 1L };
+
+        out.add("long mismatch(a,b)=" + Arrays.mismatch(a, b));
+        out.add("long mismatch(a,c)=" + Arrays.mismatch(a, c));
+        out.add("long mismatch(a,prefix)=" + Arrays.mismatch(a, prefix));
+        out.add("long mismatch(a,1,3,c,1,3)=" + Arrays.mismatch(a, 1, 3, c, 1, 3));
+        out.add("long equals(a,0,3,b,0,3)=" + Arrays.equals(a, 0, 3, b, 0, 3));
+        out.add("long equals(a,0,3,c,0,3)=" + Arrays.equals(a, 0, 3, c, 0, 3));
+        out.add("long compare(a,b)=" + Arrays.compare(a, b));
+        out.add("long compare(a,c)=" + Arrays.compare(a, c));
+        out.add("long compare(null,null)=" + Arrays.compare((long[]) null, (long[]) null));
+        out.add("long compare(a,null)=" + Arrays.compare(a, (long[]) null));
+        out.add("long compare(a,1,3,c,1,3)=" + Arrays.compare(a, 1, 3, c, 1, 3));
+        out.add("long compareUnsigned(minus,one)=" + Arrays.compareUnsigned(minus, one));
+        out.add("long compareUnsigned(one,minus)=" + Arrays.compareUnsigned(one, minus));
+        out.add("long compareUnsigned(null,null)=" + Arrays.compareUnsigned((long[]) null, (long[]) null));
+        out.add("long compareUnsigned(minus,0,1,one,0,1)=" + Arrays.compareUnsigned(minus, 0, 1, one, 0, 1));
+    }
+
+    private static void shorts(List<String> out) {
+        final short[] a = { 1, 2, 3 };
+        final short[] b = { 1, 2, 3 };
+        final short[] c = { 1, 2, 4 };
+        final short[] prefix = { 1, 2 };
+        final short[] minus = { -1 };
+        final short[] one = { 1 };
+
+        out.add("short mismatch(a,b)=" + Arrays.mismatch(a, b));
+        out.add("short mismatch(a,c)=" + Arrays.mismatch(a, c));
+        out.add("short mismatch(a,prefix)=" + Arrays.mismatch(a, prefix));
+        out.add("short mismatch(a,1,3,c,1,3)=" + Arrays.mismatch(a, 1, 3, c, 1, 3));
+        out.add("short equals(a,0,3,b,0,3)=" + Arrays.equals(a, 0, 3, b, 0, 3));
+        out.add("short equals(a,0,3,c,0,3)=" + Arrays.equals(a, 0, 3, c, 0, 3));
+        out.add("short compare(a,b)=" + Arrays.compare(a, b));
+        out.add("short compare(a,c)=" + Arrays.compare(a, c));
+        out.add("short compare(minus,one)=" + Arrays.compare(minus, one));
+        out.add("short compare(null,null)=" + Arrays.compare((short[]) null, (short[]) null));
+        out.add("short compare(a,null)=" + Arrays.compare(a, (short[]) null));
+        out.add("short compare(a,1,3,c,1,3)=" + Arrays.compare(a, 1, 3, c, 1, 3));
+        out.add("short compareUnsigned(minus,one)=" + Arrays.compareUnsigned(minus, one));
+        out.add("short compareUnsigned(a,b)=" + Arrays.compareUnsigned(a, b));
+        out.add("short compareUnsigned(null,null)=" + Arrays.compareUnsigned((short[]) null, (short[]) null));
+        out.add("short compareUnsigned(minus,0,1,one,0,1)=" + Arrays.compareUnsigned(minus, 0, 1, one, 0, 1));
+    }
+
+    private static void booleans(List<String> out) {
+        final boolean[] a = { true, false };
+        final boolean[] b = { true, false };
+        final boolean[] c = { true, true };
+        final boolean[] prefix = { true };
+
+        out.add("boolean mismatch(a,b)=" + Arrays.mismatch(a, b));
+        out.add("boolean mismatch(a,c)=" + Arrays.mismatch(a, c));
+        out.add("boolean mismatch(a,prefix)=" + Arrays.mismatch(a, prefix));
+        out.add("boolean mismatch(a,1,2,c,1,2)=" + Arrays.mismatch(a, 1, 2, c, 1, 2));
+        out.add("boolean equals(a,0,2,b,0,2)=" + Arrays.equals(a, 0, 2, b, 0, 2));
+        out.add("boolean equals(a,0,2,c,0,2)=" + Arrays.equals(a, 0, 2, c, 0, 2));
+        out.add("boolean compare(a,b)=" + Arrays.compare(a, b));
+        out.add("boolean compare(a,c)=" + Arrays.compare(a, c));
+        out.add("boolean compare(c,a)=" + Arrays.compare(c, a));
+        out.add("boolean compare(null,null)=" + Arrays.compare((boolean[]) null, (boolean[]) null));
+        out.add("boolean compare(a,null)=" + Arrays.compare(a, (boolean[]) null));
+        out.add("boolean compare(a,1,2,c,1,2)=" + Arrays.compare(a, 1, 2, c, 1, 2));
+    }
+
+    /** References without a comparator, which go by `Objects.equals`. */
+    private static void references(List<String> out) {
+        final Object[] a = { "x", "y", "z" };
+        final Object[] b = { "x", "y", "z" };
+        final Object[] c = { "x", "y", "w" };
+        final Object[] prefix = { "x", "y" };
+        final Object[] withNull = { null, "y" };
+        final Object[] withNull2 = { null, "y" };
+
+        out.add("ref mismatch(a,b)=" + Arrays.mismatch(a, b));
+        out.add("ref mismatch(a,a)=" + Arrays.mismatch(a, a));
+        out.add("ref mismatch(a,c)=" + Arrays.mismatch(a, c));
+        out.add("ref mismatch(a,prefix)=" + Arrays.mismatch(a, prefix));
+        out.add("ref mismatch(withNull,withNull2)=" + Arrays.mismatch(withNull, withNull2));
+        out.add("ref mismatch(withNull,a)=" + Arrays.mismatch(withNull, a));
+        out.add("ref mismatch(a,1,3,c,1,3)=" + Arrays.mismatch(a, 1, 3, c, 1, 3));
+        out.add("ref mismatch(withNull,0,2,withNull2,0,2)="
+                + Arrays.mismatch(withNull, 0, 2, withNull2, 0, 2));
+        out.add("ref equals(a,0,3,b,0,3)=" + Arrays.equals(a, 0, 3, b, 0, 3));
+        out.add("ref equals(a,0,3,c,0,3)=" + Arrays.equals(a, 0, 3, c, 0, 3));
+        out.add("ref equals(withNull,0,2,withNull2,0,2)="
+                + Arrays.equals(withNull, 0, 2, withNull2, 0, 2));
+        out.add("ref mismatch(null,null)=" + attempt(new Call() {
+            public Object run() { return Arrays.mismatch((Object[]) null, (Object[]) null); }
+        }));
+    }
+
+    /** `Comparable` elements, where a null sorts before anything else. */
+    private static void comparables(List<String> out) {
+        final String[] a = { "a", "b", "c" };
+        final String[] b = { "a", "b", "c" };
+        final String[] z = { "a", "b", "z" };
+        final String[] prefix = { "a" };
+        final String[] withNull = { null, "b" };
+        final String[] withNull2 = { null, "b" };
+
+        out.add("cmp compare(a,b)=" + Arrays.compare(a, b));
+        out.add("cmp compare(a,z)=" + Arrays.compare(a, z));
+        out.add("cmp compare(prefix,a)=" + Arrays.compare(prefix, a));
+        out.add("cmp compare(withNull,a)=" + Arrays.compare(withNull, a));
+        out.add("cmp compare(a,withNull)=" + Arrays.compare(a, withNull));
+        out.add("cmp compare(withNull,withNull2)=" + Arrays.compare(withNull, withNull2));
+        out.add("cmp compare(null,null)=" + Arrays.compare((String[]) null, (String[]) null));
+        out.add("cmp compare(null,a)=" + Arrays.compare((String[]) null, a));
+        out.add("cmp compare(a,null)=" + Arrays.compare(a, (String[]) null));
+        out.add("cmp compare(a,1,3,z,1,3)=" + Arrays.compare(a, 1, 3, z, 1, 3));
+        out.add("cmp compare(withNull,0,2,a,0,2)=" + Arrays.compare(withNull, 0, 2, a, 0, 2));
+        out.add("cmp compare(a,0,1,a,0,3)=" + Arrays.compare(a, 0, 1, a, 0, 3));
+        out.add("cmp compare(a,0,9,z,0,3)=" + attempt(new Call() {
+            public Object run() { return Arrays.compare(a, 0, 9, z, 0, 3); }
+        }));
+    }
+
+    /** A comparator that counts, because how often it is asked is observable. */
+    private static final class Counting implements Comparator<String> {
+
+        private int calls;
+
+        public int compare(String left, String right) {
+            calls++;
+            if (left == null || right == null) {
+                return left == null ? (right == null ? 0 : -1) : 1;
+            }
+            return left.compareTo(right);
+        }
+    }
+
+    private static void comparators(List<String> out) {
+        final String shared = "x";
+        final String[] a = { shared, shared, shared };
+        final String[] copy = { shared, shared, shared };
+        final String[] other = { shared, shared, "y" };
+        final String[] prefix = { shared, shared };
+
+        Counting counter = new Counting();
+        out.add("cmp2 mismatch(a,copy)=" + Arrays.mismatch(a, copy, counter));
+        out.add("cmp2 mismatch calls=" + counter.calls);
+
+        counter = new Counting();
+        out.add("cmp2 mismatch(a,a)=" + Arrays.mismatch(a, a, counter));
+        out.add("cmp2 mismatch(a,a) calls=" + counter.calls);
+
+        counter = new Counting();
+        out.add("cmp2 mismatch(a,other)=" + Arrays.mismatch(a, other, counter));
+        out.add("cmp2 mismatch(a,prefix)=" + Arrays.mismatch(a, prefix, counter));
+
+        counter = new Counting();
+        out.add("cmp2 mismatch(a,0,3,other,0,3)=" + Arrays.mismatch(a, 0, 3, other, 0, 3, counter));
+        out.add("cmp2 mismatch range calls=" + counter.calls);
+
+        // equals asks about two identical references and mismatch does not, so
+        // these two counts are supposed to disagree.
+        counter = new Counting();
+        out.add("cmp2 equals(a,copy)=" + Arrays.equals(a, copy, counter));
+        out.add("cmp2 equals calls=" + counter.calls);
+
+        counter = new Counting();
+        out.add("cmp2 equals(a,a)=" + Arrays.equals(a, a, counter));
+        out.add("cmp2 equals(a,a) calls=" + counter.calls);
+
+        counter = new Counting();
+        out.add("cmp2 equals(a,prefix)=" + Arrays.equals(a, prefix, counter));
+        out.add("cmp2 equals(a,prefix) calls=" + counter.calls);
+        out.add("cmp2 equals(a,null)=" + Arrays.equals(a, (String[]) null, counter));
+        out.add("cmp2 equals(null,null)=" + Arrays.equals((String[]) null, (String[]) null, counter));
+
+        counter = new Counting();
+        out.add("cmp2 equals(a,0,3,copy,0,3)=" + Arrays.equals(a, 0, 3, copy, 0, 3, counter));
+        out.add("cmp2 equals range calls=" + counter.calls);
+        out.add("cmp2 equals(a,0,3,prefix,0,2)=" + Arrays.equals(a, 0, 3, prefix, 0, 2, counter));
+
+        counter = new Counting();
+        out.add("cmp2 compare(a,copy)=" + Arrays.compare(a, copy, counter));
+        out.add("cmp2 compare calls=" + counter.calls);
+        out.add("cmp2 compare(a,other)=" + Arrays.compare(a, other, counter));
+        out.add("cmp2 compare(a,prefix)=" + Arrays.compare(a, prefix, counter));
+        out.add("cmp2 compare(null,null)=" + Arrays.compare((String[]) null, (String[]) null, counter));
+        out.add("cmp2 compare(null,a)=" + Arrays.compare((String[]) null, a, counter));
+        out.add("cmp2 compare(a,null)=" + Arrays.compare(a, (String[]) null, counter));
+        out.add("cmp2 compare(a,0,3,other,0,3)=" + Arrays.compare(a, 0, 3, other, 0, 3, counter));
+
+        // The comparator is checked before either array is looked at, so a bad
+        // range does not get the chance to throw first.
+        out.add("cmp2 compare(a,0,9,..,null)=" + attempt(new Call() {
+            public Object run() { return Arrays.compare(a, 0, 9, other, 0, 3, null); }
+        }));
+        out.add("cmp2 mismatch(a,0,9,..,null)=" + attempt(new Call() {
+            public Object run() { return Arrays.mismatch(a, 0, 9, other, 0, 3, null); }
+        }));
+        out.add("cmp2 equals(a,0,9,..,null)=" + attempt(new Call() {
+            public Object run() { return Arrays.equals(a, 0, 9, other, 0, 3, null); }
+        }));
+        out.add("cmp2 mismatch(a,null,cmp)=" + attempt(new Call() {
+            public Object run() { return Arrays.mismatch(a, (String[]) null, new Counting()); }
+        }));
+    }
+
+    public static String runAll() {
+        List<String> out = new ArrayList<String>();
+        bytes(out);
+        chars(out);
+        doubles(out);
+        floats(out);
+        ints(out);
+        longs(out);
+        shorts(out);
+        booleans(out);
+        references(out);
+        comparables(out);
+        comparators(out);
+        return String.join("\n", out);
+    }
+
+    public static void main(String[] args) {
+        System.out.println(runAll());
+    }
+}
