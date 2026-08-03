@@ -325,6 +325,47 @@ abstract class VerifyOnJava8 @Inject constructor(
     }
 }
 
+/**
+ * Lists every method a module gained between two releases.
+ *
+ * Reads `ct.sym` from a JDK 21 toolchain, which is the same per-release record
+ * `javac --release` consults, so the answer is the compiler's rather than a list
+ * anybody has to keep current. Members already rewritten are marked, as are the
+ * ones that only look new because they moved down a hierarchy.
+ *
+ * `-PapiGapFrom=8 -PapiGapTo=21 -PapiGapModule=java.base` to change the scope.
+ */
+tasks.register<JavaExec>("apiGap") {
+    group = "lowbyte"
+    description = "Reports every JDK method added between two releases, and what Lowbyte does about it."
+
+    dependsOn(tasks.named("testClasses"))
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("dev.iiahmed.lowbyte.ApiGapReportKt")
+
+    val jdk21 = javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(21)) }
+    // Run on the newer JDK: ct.sym holds every release except its own, so
+    // the newest one is only readable from that JVM's own image.
+    javaLauncher.set(jdk21)
+    val from = providers.gradleProperty("apiGapFrom").getOrElse("8")
+    val to = providers.gradleProperty("apiGapTo").getOrElse("21")
+    val module = providers.gradleProperty("apiGapModule").getOrElse("java.base")
+    val report = layout.buildDirectory.file("reports/api-gap-$module-$from-to-$to.txt")
+
+    // Named, so the same line can be pasted into a run configuration.
+    argumentProviders.add {
+        listOf(
+            "--ctsym=" + jdk21.get().metadata.installationPath.file("lib/ct.sym").asFile.absolutePath,
+            "--from=$from",
+            "--to=$to",
+            "--module=$module",
+            "--out=" + report.get().asFile.absolutePath
+        )
+    }
+
+    outputs.upToDateWhen { false }
+}
+
 val verifyOnJava8 = tasks.register<VerifyOnJava8>("verifyOnJava8") {
     group = "lowbyte"
     description = "Downgrades the fixtures to Java 8 and runs them on a real JDK 8."

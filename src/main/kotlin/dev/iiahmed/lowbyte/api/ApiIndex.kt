@@ -6,6 +6,9 @@ import org.objectweb.asm.FieldVisitor
 import org.objectweb.asm.MethodVisitor
 import org.objectweb.asm.Opcodes
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.FileSystems
+import java.net.URI
 import java.util.zip.ZipFile
 
 /**
@@ -40,6 +43,50 @@ class ApiIndex private constructor(
 
     /** Whether the index has anything to say about this type at all. */
     fun knowsType(owner: String): Boolean = types.containsKey(owner)
+
+    /** Every type the index holds, for tooling that diffs one release against another. */
+    val typeNames: Set<String> get() = types.keys
+
+    /**
+     * What [owner] declares itself, without the supertype walk [hasMember] does.
+     *
+     * Diffing two releases wants exactly this: a member that moved up into a
+     * supertype was not added, and counting it as added would bury the ones that
+     * were. `String.chars` reads as new in 9 by this measure and is not, because
+     * `CharSequence` had it in 8, which is why the report says so rather than
+     * leaving it to be rediscovered.
+     */
+    fun declaredMembers(owner: String): Set<String> = types[owner]?.members.orEmpty()
+
+    /**
+     * The same call with a different return type, if this release had one.
+     *
+     * Java 9 gave the buffers covariant overrides: `ByteBuffer.flip` returned
+     * `Buffer` in 8 and returns `ByteBuffer` from 9 on. Nothing was added in any
+     * useful sense, but the descriptor changed, so a call compiled on 9 names a
+     * method Java 8 does not have and dies with a `NoSuchMethodError`. Those
+     * are worth telling apart from real additions: the older one is right there
+     * to call, needing only a cast.
+     */
+    fun covariantOf(owner: String, name: String, descriptor: String): String? {
+        val parameters = descriptor.substringBefore(')') + ')'
+        val seen = mutableSetOf<String>()
+        val pending = ArrayDeque<String>().apply { add(owner) }
+
+        while (pending.isNotEmpty()) {
+            val current = pending.removeFirst()
+            if (!seen.add(current)) continue
+
+            val type = types[current] ?: continue
+            type.members.firstOrNull { it.startsWith(name + parameters) && it != name + descriptor }
+                ?.let { return "$current.$it" }
+
+            type.superName?.let { pending.add(it) }
+            pending.addAll(type.interfaces)
+        }
+
+        return null
+    }
 
     /**
      * Whether [owner] had this member at the indexed release, inherited or not.
@@ -93,6 +140,32 @@ class ApiIndex private constructor(
             File(System.getProperty("java.home"), "lib/ct.sym").takeIf { it.isFile }
 
         /**
+         * The API of the JVM running right now, read from its own image.
+         *
+         * `ct.sym` records every release *except* the current one, because javac
+         * compiles against the live platform for that. So the newest release can
+         * only be had this way, and only by running on it.
+         *
+         * Unlike a `.sig` file, an image class carries its private members too,
+         * so those are dropped here to leave the same shape [read] returns.
+         */
+        fun readRunningPlatform(module: String): ApiIndex {
+            val root = FileSystems.getFileSystem(URI.create("jrt:/")).getPath("/modules", module)
+            if (!Files.isDirectory(root)) return EMPTY
+
+            val types = mutableMapOf<String, Type>()
+            Files.walk(root).use { paths ->
+                paths.filter { it.toString().endsWith(".class") }.forEach { path ->
+                    val name = root.relativize(path).toString().replace('\\', '/').removeSuffix(".class")
+                    val collector = Collector(apiOnly = true)
+                    ClassReader(Files.readAllBytes(path)).accept(collector, ClassReader.SKIP_CODE)
+                    types[name] = collector.toType()
+                }
+            }
+            return ApiIndex(types)
+        }
+
+        /**
          * Reads every type that existed at [release].
          *
          * Returns [EMPTY] when the file has nothing for that release, which is
@@ -100,7 +173,7 @@ class ApiIndex private constructor(
          * whether that is worth complaining about, since it only matters if the
          * API check was asked for.
          */
-        fun read(ctSym: File, release: Int): ApiIndex {
+        fun read(ctSym: File, release: Int, module: String? = null): ApiIndex {
             val character = releaseCharacter(release) ?: return EMPTY
             val types = mutableMapOf<String, Type>()
 
@@ -112,8 +185,10 @@ class ApiIndex private constructor(
                     if (!releases.contains(character)) return@forEach
 
                     // <releases>/<module>/<package>/<Type>.sig
-                    val type = entry.name
-                        .substringAfter('/')
+                    val withoutReleases = entry.name.substringAfter('/')
+                    if (module != null && withoutReleases.substringBefore('/') != module) return@forEach
+
+                    val type = withoutReleases
                         .substringAfter('/')
                         .removeSuffix(".sig")
 
@@ -132,7 +207,7 @@ class ApiIndex private constructor(
          * A stripped class file carries the members and nothing else, so the
          * names and descriptors are all we take.
          */
-        private class Collector : ClassVisitor(Opcodes.ASM9) {
+        private class Collector(private val apiOnly: Boolean = false) : ClassVisitor(Opcodes.ASM9) {
 
             private val into = mutableSetOf<String>()
             private var superName: String? = null
@@ -159,7 +234,7 @@ class ApiIndex private constructor(
                 signature: String?,
                 exceptions: Array<out String>?
             ): MethodVisitor? {
-                into += key(name.orEmpty(), descriptor.orEmpty())
+                if (!apiOnly || isApi(access)) into += key(name.orEmpty(), descriptor.orEmpty())
                 return null
             }
 
@@ -170,9 +245,13 @@ class ApiIndex private constructor(
                 signature: String?,
                 value: Any?
             ): FieldVisitor? {
-                into += key(name.orEmpty(), descriptor.orEmpty())
+                if (!apiOnly || isApi(access)) into += key(name.orEmpty(), descriptor.orEmpty())
                 return null
             }
+
+            /** What a `.sig` file would have kept: the members callers can see. */
+            private fun isApi(access: Int) =
+                (access and (Opcodes.ACC_PUBLIC or Opcodes.ACC_PROTECTED)) != 0
         }
     }
 }
