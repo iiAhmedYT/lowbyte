@@ -3,3 +3,6 @@ plugins {
 }
 
 rootProject.name = "lowbyte"
+
+include("core")
+include("gradle-plugin")

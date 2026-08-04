@@ -1,40 +1,35 @@
 package dev.iiahmed.lowbyte
 
 import dev.iiahmed.lowbyte.classfile.ClassFileVersion
-import dev.iiahmed.lowbyte.tasks.DowngradeBytecode
-import org.gradle.api.GradleException
-import org.gradle.testfixtures.ProjectBuilder
+import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import org.objectweb.asm.ClassWriter
-import org.objectweb.asm.ConstantDynamic
-import org.objectweb.asm.Handle
 import org.objectweb.asm.Opcodes
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.lang.module.ModuleDescriptor
 import java.util.jar.Attributes
-import java.util.jar.JarFile
 import java.util.jar.Manifest
-import java.util.jar.JarOutputStream
-import java.util.zip.ZipEntry
-import kotlin.test.assertContains
 import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * The task, over a real jar.
+ * What a downgrade does to the jar rather than to a class.
  *
- * Everything else tests one class at a time through
- * [dev.iiahmed.lowbyte.downgrade.ClassDowngrader]. The jar level has its own
- * behaviour that only shows up here: entries that are not classes, the marker
+ * Everything else works one class at a time through
+ * [dev.iiahmed.lowbyte.downgrade.ClassDowngrader]. The jar level has behaviour
+ * of its own that only shows up here: entries that are not classes, the marker
  * classes a bridged constructor adds, exclusions, module descriptors, and what
- * happens to the output when something cannot be downgraded.
+ * a signed jar loses on the way through.
+ *
+ * These used to run through the Gradle task, which was the only thing that
+ * could open a jar. Since that moved into [Lowbyte] they no longer need a build
+ * tool, and testing them through one only obscured which layer they were about.
  */
-class DowngradeBytecodeTaskTest {
+class LowbyteJarTest {
 
     @TempDir
     lateinit var tempDir: File
@@ -43,24 +38,24 @@ class DowngradeBytecodeTaskTest {
     fun everyClassIsDowngradedAndEverythingElseIsCopied() {
         val resource = "not a class file".toByteArray()
         val output = run(
-            entries = fixtureEntries("NestSample") + mapOf("data/notes.txt" to resource),
+            entries = Jars.entriesOf("NestSample") + mapOf("data/notes.txt" to resource),
             target = 9
         )
 
         output.filterKeys { it.endsWith(".class") }.forEach { (name, bytes) ->
             assertEquals(9, ClassFileVersion.toJavaVersion(Fixtures.majorVersionOf(bytes)), name)
         }
-        assertContentEquals(resource, output.getValue("data/notes.txt"), "a resource was rewritten")
+        assertSameBytes(resource, output.getValue("data/notes.txt"), "a resource was rewritten")
     }
 
     @Test
     fun markerClassesForBridgedConstructorsReachTheJar() {
         // These are the only entries in the output that had no entry in the
-        // input, so nothing outside the task would notice them going missing.
-        val output = run(fixtureEntries("NestSample"), target = 9)
+        // input, so nothing outside this would notice them going missing.
+        val output = run(Jars.entriesOf("NestSample"), target = 9)
 
-        assertContains(output.keys, "NestSample\$lowbyte\$Nest.class")
-        assertContains(output.keys, "NestSample\$Secret\$lowbyte\$Nest.class")
+        assertTrue(output.containsKey("NestSample\$lowbyte\$Nest.class"), output.keys.toString())
+        assertTrue(output.containsKey("NestSample\$Secret\$lowbyte\$Nest.class"), output.keys.toString())
         assertEquals(
             9,
             ClassFileVersion.toJavaVersion(
@@ -71,7 +66,7 @@ class DowngradeBytecodeTaskTest {
 
     @Test
     fun aTargetThatKeepsNestsAddsNoMarkers() {
-        val output = run(fixtureEntries("NestSample"), target = 11)
+        val output = run(Jars.entriesOf("NestSample"), target = 11)
 
         assertTrue(
             output.keys.none { it.contains("lowbyte\$Nest") },
@@ -86,7 +81,7 @@ class DowngradeBytecodeTaskTest {
         // was downgraded for.
         listOf(17, 11, 9).forEach { target ->
             val output = run(
-                fixtureEntries("EnumSample") + mapOf("module-info.class" to moduleInfoClass()),
+                Jars.entriesOf("EnumSample") + mapOf("module-info.class" to moduleInfoClass()),
                 target = target
             )
             val descriptor = output.getValue("module-info.class")
@@ -107,14 +102,17 @@ class DowngradeBytecodeTaskTest {
         // UnsupportedClassVersionError, lowered it gets ClassFormatError, since
         // CONSTANT_Module does not exist before class file 53. Walking every
         // class entry is ordinary scanner behaviour, so the entry has to go.
-        val output = run(
-            fixtureEntries("EnumSample") + mapOf("module-info.class" to moduleInfoClass()),
-            target = 8
+        val output = File(tempDir, "dropped.jar")
+        val result = Lowbyte.targeting(8).build().downgrade(
+            Jars.of(tempDir, Jars.entriesOf("EnumSample") + mapOf("module-info.class" to moduleInfoClass())),
+            output
         )
 
-        assertFalse(output.containsKey("module-info.class"), "the descriptor survived: ${output.keys}")
+        assertTrue(result.droppedModuleInfo, "the result should say the descriptor went")
+        val entries = Jars.read(output)
+        assertFalse(entries.containsKey("module-info.class"), "the descriptor survived: ${entries.keys}")
         assertTrue(
-            output.keys.any { it == "EnumSample.class" },
+            entries.keys.any { it == "EnumSample.class" },
             "dropping the descriptor should not disturb anything else"
         )
     }
@@ -126,9 +124,9 @@ class DowngradeBytecodeTaskTest {
         val moduleInfo = moduleInfoClass()
         val name = "META-INF/versions/11/module-info.class"
 
-        val output = run(fixtureEntries("EnumSample") + mapOf(name to moduleInfo), target = 8)
+        val output = run(Jars.entriesOf("EnumSample") + mapOf(name to moduleInfo), target = 8)
 
-        assertContentEquals(moduleInfo, output.getValue(name), "the versioned copy was rewritten")
+        assertSameBytes(moduleInfo, output.getValue(name), "the versioned copy was rewritten")
     }
 
     @Test
@@ -136,7 +134,7 @@ class DowngradeBytecodeTaskTest {
         val moduleInfo = moduleInfoClass()
         val name = "META-INF/versions/11/module-info.class"
 
-        val output = run(fixtureEntries("EnumSample") + mapOf(name to moduleInfo), target = 11)
+        val output = run(Jars.entriesOf("EnumSample") + mapOf(name to moduleInfo), target = 11)
 
         assertEquals(11, ClassFileVersion.toJavaVersion(Fixtures.majorVersionOf(output.getValue(name))))
         assertEquals("foo.bar", ModuleDescriptor.read(ByteArrayInputStream(output.getValue(name))).name())
@@ -144,10 +142,10 @@ class DowngradeBytecodeTaskTest {
 
     @Test
     fun excludedClassesAreCopiedUnchanged() {
-        val entries = fixtureEntries("EnumSample")
+        val entries = Jars.entriesOf("EnumSample")
         val output = run(entries, target = 11, excluded = listOf("EnumSample\$Color"))
 
-        assertContentEquals(
+        assertSameBytes(
             entries.getValue("EnumSample\$Color.class"),
             output.getValue("EnumSample\$Color.class"),
             "an excluded class was rewritten"
@@ -169,7 +167,7 @@ class DowngradeBytecodeTaskTest {
         // starts with the same characters.
         val output = run(entries, target = 11, excluded = listOf("com/foo"))
 
-        assertContentEquals(
+        assertSameBytes(
             entries.getValue("com/foo/Kept.class"),
             output.getValue("com/foo/Kept.class"),
             "the excluded package was rewritten"
@@ -190,7 +188,7 @@ class DowngradeBytecodeTaskTest {
         )
         val output = run(entries, target = 11, excluded = listOf("com.foo.Outer"))
 
-        assertContentEquals(
+        assertSameBytes(
             entries.getValue("com/foo/Outer\$Inner.class"),
             output.getValue("com/foo/Outer\$Inner.class"),
             "a nested class of an excluded class was rewritten"
@@ -204,21 +202,28 @@ class DowngradeBytecodeTaskTest {
 
     @Test
     fun signatureFilesAreDroppedAndManifestDigestsGoWithThem() {
-        val output = run(
-            fixtureEntries("EnumSample") + mapOf(
-                "META-INF/MANIFEST.MF" to signedManifest(),
-                "META-INF/LOWBYTE.SF" to "signature file".toByteArray(),
-                "META-INF/LOWBYTE.RSA" to "signature block".toByteArray()
+        val output = File(tempDir, "signed-out.jar")
+        val result = Lowbyte.targeting(11).build().downgrade(
+            Jars.of(
+                tempDir,
+                Jars.entriesOf("EnumSample") + mapOf(
+                    "META-INF/MANIFEST.MF" to signedManifest(),
+                    "META-INF/LOWBYTE.SF" to "signature file".toByteArray(),
+                    "META-INF/LOWBYTE.RSA" to "signature block".toByteArray()
+                )
             ),
-            target = 11
+            output
         )
 
+        assertEquals(2, result.droppedSignatures, "the result should count what it dropped")
+
+        val entries = Jars.read(output)
         assertTrue(
-            output.keys.none { it.endsWith(".SF") || it.endsWith(".RSA") },
-            "the signature block survived: ${output.keys}"
+            entries.keys.none { it.endsWith(".SF") || it.endsWith(".RSA") },
+            "the signature block survived: ${entries.keys}"
         )
 
-        val manifest = Manifest(ByteArrayInputStream(output.getValue("META-INF/MANIFEST.MF")))
+        val manifest = Manifest(ByteArrayInputStream(entries.getValue("META-INF/MANIFEST.MF")))
         assertEquals(
             "1.0", manifest.mainAttributes.getValue("Manifest-Version"),
             "the main section should be left alone"
@@ -245,126 +250,52 @@ class DowngradeBytecodeTaskTest {
     fun anUnsignedManifestIsCopiedByteForByte() {
         val plain = "Manifest-Version: 1.0\r\nMain-Class: dev.iiahmed.Main\r\n\r\n".toByteArray()
         val output = run(
-            fixtureEntries("EnumSample") + mapOf("META-INF/MANIFEST.MF" to plain),
+            Jars.entriesOf("EnumSample") + mapOf("META-INF/MANIFEST.MF" to plain),
             target = 11
         )
 
-        assertContentEquals(plain, output.getValue("META-INF/MANIFEST.MF"), "an unsigned manifest was rewritten")
+        assertSameBytes(plain, output.getValue("META-INF/MANIFEST.MF"), "an unsigned manifest was rewritten")
     }
 
     @Test
-    fun apiFindingsNeverFailTheBuild() {
-        // String.isBlank has no faithful Java 8 equivalent, so it is reported.
-        // A call like that may well sit behind a runtime version check, which is
-        // correct code, so it must not fail the build however failOnUnsupported
-        // is set.
-        val outputFile = File(tempDir, "out.jar")
-        val inputFile = jarOf(mapOf("Blank.class" to isBlankCaller()))
+    fun apiFindingsAreReportedAndNeverFatal() {
+        // InputStream.readAllBytes is Java 9 and deliberately not rewritten:
+        // ByteArrayInputStream specialises it, so one generic replacement would
+        // be wrong for some receivers. A call like it may also sit behind a
+        // runtime version check, which is correct code, so it comes back as a
+        // finding however failOnUnsupported is set.
+        assumeTrue(!Fixtures.apiIndexFor(8).isEmpty, "this JDK's ct.sym has no data for Java 8")
 
-        task(inputFile, outputFile, target = 8, api = true, failOnUnsupported = true).downgrade()
+        val output = File(tempDir, "bytes-out.jar")
+        val result = Lowbyte.targeting(8).api(true).failOnUnsupported(true).build()
+            .downgrade(Jars.of(tempDir, mapOf("Bytes.class" to readAllBytesCaller())), output)
 
-        assertTrue(outputFile.exists(), "an API finding must not delete the jar")
+        assertTrue(output.exists(), "an API finding must not delete the jar")
+        assertEquals(emptyList(), result.unsupported, "an API finding is not an unsupported construct")
+        assertTrue(
+            result.apiFindings.any { it.contains("readAllBytes") },
+            "readAllBytes should have been reported: ${result.apiFindings}"
+        )
         assertEquals(
             8,
-            ClassFileVersion.toJavaVersion(Fixtures.majorVersionOf(readJar(outputFile).getValue("Blank.class")))
+            ClassFileVersion.toJavaVersion(Fixtures.majorVersionOf(Jars.read(output).getValue("Bytes.class")))
         )
-    }
-
-    @Test
-    fun anUnsupportedConstructFailsTheBuildAndDeletesTheJar() {
-        val outputFile = File(tempDir, "out.jar")
-        val inputFile = jarOf(mapOf("Condy.class" to condyClass()))
-
-        val failure = assertFailsWith<GradleException> {
-            task(inputFile, outputFile, target = 9).downgrade()
-        }
-
-        assertTrue(failure.message!!.contains("CONSTANT_Dynamic"), failure.message!!)
-        assertFalse(outputFile.exists(), "a jar that cannot run must not be left behind")
-    }
-
-    @Test
-    fun failOnUnsupportedOffKeepsTheJar() {
-        val outputFile = File(tempDir, "out.jar")
-        val inputFile = jarOf(mapOf("Condy.class" to condyClass()))
-
-        task(inputFile, outputFile, target = 9, failOnUnsupported = false).downgrade()
-
-        assertTrue(outputFile.exists(), "with the check off the jar should survive")
     }
 
     // helpers
 
-    private fun assertContentEquals(expected: ByteArray, actual: ByteArray, message: String = "") {
+    private fun assertSameBytes(expected: ByteArray, actual: ByteArray, message: String) {
         assertTrue(expected.contentEquals(actual), message)
     }
-
-    private fun fixtureEntries(sample: String): Map<String, ByteArray> =
-        Fixtures.classNames(sample).associate { "$it.class" to Fixtures.readClass(it) }
 
     private fun run(
         entries: Map<String, ByteArray>,
         target: Int,
         excluded: List<String> = emptyList()
     ): Map<String, ByteArray> {
-        val outputFile = File(tempDir, "out.jar")
-        task(jarOf(entries), outputFile, target, excluded = excluded).downgrade()
-        return readJar(outputFile)
-    }
-
-    private fun task(
-        input: File,
-        output: File,
-        target: Int,
-        excluded: List<String> = emptyList(),
-        failOnUnsupported: Boolean = true,
-        api: Boolean = false
-    ): DowngradeBytecode {
-        val project = ProjectBuilder.builder().withProjectDir(tempDir).build()
-        return project.tasks.create("downgrade${target}${output.name.hashCode()}", DowngradeBytecode::class.java)
-            .apply {
-                targetJavaVersion.set(target)
-                excludedClasses.set(excluded)
-                this.failOnUnsupported.set(failOnUnsupported)
-                this.api.set(api)
-                inputJar.set(input)
-                outputJar.set(output)
-            }
-    }
-
-    /** A Java 21 class calling String.isBlank, which cannot be rebuilt. */
-    private fun isBlankCaller(): ByteArray {
-        val cw = ClassWriter(ClassWriter.COMPUTE_MAXS)
-        cw.visit(
-            ClassFileVersion.fromJavaVersion(21),
-            Opcodes.ACC_PUBLIC or Opcodes.ACC_SUPER,
-            "Blank", null, "java/lang/Object", null
-        )
-        val mv = cw.visitMethod(Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC, "go", "(Ljava/lang/String;)Z", null, null)
-        mv.visitCode()
-        mv.visitVarInsn(Opcodes.ALOAD, 0)
-        mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "isBlank", "()Z", false)
-        mv.visitInsn(Opcodes.IRETURN)
-        mv.visitMaxs(0, 0)
-        mv.visitEnd()
-        cw.visitEnd()
-        return cw.toByteArray()
-    }
-
-    private fun jarOf(entries: Map<String, ByteArray>): File {
-        val file = File(tempDir, "in-${entries.keys.hashCode()}.jar")
-        JarOutputStream(file.outputStream()).use { jos ->
-            entries.forEach { (name, bytes) ->
-                jos.putNextEntry(ZipEntry(name))
-                jos.write(bytes)
-                jos.closeEntry()
-            }
-        }
-        return file
-    }
-
-    private fun readJar(file: File): Map<String, ByteArray> = JarFile(file).use { jar ->
-        jar.entries().asSequence().associate { it.name to jar.getInputStream(it).readAllBytes() }
+        val output = File(tempDir, "out-${entries.keys.hashCode()}-$target.jar")
+        Lowbyte.targeting(target).exclude(excluded).build().downgrade(Jars.of(tempDir, entries), output)
+        return Jars.read(output)
     }
 
     /** What `jarsigner` leaves behind: per-entry digests beside real attributes. */
@@ -402,35 +333,20 @@ class DowngradeBytecodeTaskTest {
         return cw.toByteArray()
     }
 
-    /** A class holding something no target below 11 can express. */
-    private fun condyClass(): ByteArray {
+    /** A Java 21 class calling a Java 9 method Lowbyte declines to rebuild. */
+    private fun readAllBytesCaller(): ByteArray {
         val cw = ClassWriter(ClassWriter.COMPUTE_MAXS)
         cw.visit(
             ClassFileVersion.fromJavaVersion(21),
             Opcodes.ACC_PUBLIC or Opcodes.ACC_SUPER,
-            "Condy",
-            null,
-            "java/lang/Object",
-            null
+            "Bytes", null, "java/lang/Object", null
         )
         val mv = cw.visitMethod(
-            Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC, "get", "()Ljava/lang/Object;", null, null
+            Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC, "go", "(Ljava/io/InputStream;)[B", null, null
         )
         mv.visitCode()
-        mv.visitLdcInsn(
-            ConstantDynamic(
-                "constant",
-                "Ljava/lang/Object;",
-                Handle(
-                    Opcodes.H_INVOKESTATIC,
-                    "java/lang/invoke/ConstantBootstraps",
-                    "nullConstant",
-                    "(Ljava/lang/invoke/MethodHandles\$Lookup;Ljava/lang/String;Ljava/lang/Class;)" +
-                        "Ljava/lang/Object;",
-                    false
-                )
-            )
-        )
+        mv.visitVarInsn(Opcodes.ALOAD, 0)
+        mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/io/InputStream", "readAllBytes", "()[B", false)
         mv.visitInsn(Opcodes.ARETURN)
         mv.visitMaxs(0, 0)
         mv.visitEnd()

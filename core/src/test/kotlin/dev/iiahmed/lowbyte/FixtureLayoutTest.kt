@@ -21,14 +21,11 @@ import kotlin.test.fail
 class FixtureLayoutTest {
 
     private fun sourceNames(): List<String> {
-        val url = javaClass.getResource(Fixtures.SOURCES)
-            ?: fail("no ${Fixtures.SOURCES} on the test classpath")
-
-        val directory = File(url.toURI())
+        val directory = Fixtures.sourceDir
         return directory.listFiles { file: File -> file.name.endsWith(".java.txt") }
             ?.map { it.name.removeSuffix(".java.txt") }
             ?.sorted()
-            ?: fail("${Fixtures.SOURCES} is not a directory")
+            ?: fail("no fixture sources at ${directory.absolutePath}")
     }
 
     @Test
@@ -36,7 +33,7 @@ class FixtureLayoutTest {
         assertEquals(
             sourceNames(),
             Fixtures.ALL_SAMPLES.sorted(),
-            "the sources in ${Fixtures.SOURCES} and Fixtures.SAMPLES + API_SAMPLES + EXCLUDED disagree"
+            "the sources in ${Fixtures.sourceDir} and Fixtures.SAMPLES + API_SAMPLES + EXCLUDED disagree"
         )
     }
 

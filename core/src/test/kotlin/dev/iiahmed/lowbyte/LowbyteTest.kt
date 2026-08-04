@@ -198,40 +198,16 @@ class LowbyteTest {
         assertTrue(result.unsupported.single().contains("CONSTANT_Dynamic"), result.unsupported.single())
     }
 
-    @Test
-    fun exclusionsAreHonoured() {
-        val entries = fixtureEntries("EnumSample")
-        val output = File(tempDir, "out.jar")
-
-        Lowbyte.targeting(11).exclude("EnumSample\$Color").build().downgrade(jarOf(entries), output)
-
-        assertTrue(
-            entries.getValue("EnumSample\$Color.class")
-                .contentEquals(readJar(output).getValue("EnumSample\$Color.class")),
-            "an excluded class was rewritten"
-        )
-    }
-
     // helpers
+    //
+    // Exclusions, module descriptors, manifests and the rest of the jar level
+    // are LowbyteJarTest's. What is here is the settings surface and the result.
 
-    private fun fixtureEntries(sample: String): Map<String, ByteArray> =
-        Fixtures.classNames(sample).associate { "$it.class" to Fixtures.readClass(it) }
+    private fun fixtureEntries(sample: String) = Jars.entriesOf(sample)
 
-    private fun jarOf(entries: Map<String, ByteArray>): File {
-        val file = File(tempDir, "in-${entries.keys.hashCode()}.jar")
-        JarOutputStream(file.outputStream()).use { jos ->
-            entries.forEach { (name, bytes) ->
-                jos.putNextEntry(ZipEntry(name))
-                jos.write(bytes)
-                jos.closeEntry()
-            }
-        }
-        return file
-    }
+    private fun jarOf(entries: Map<String, ByteArray>): File = Jars.of(tempDir, entries)
 
-    private fun readJar(file: File): Map<String, ByteArray> = JarFile(file).use { jar ->
-        jar.entries().asSequence().associate { it.name to jar.getInputStream(it).readAllBytes() }
-    }
+    private fun readJar(file: File): Map<String, ByteArray> = Jars.read(file)
 
     /** A class holding something no target below 11 can express. */
     private fun condyClass(): ByteArray {

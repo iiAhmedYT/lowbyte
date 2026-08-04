@@ -2,7 +2,7 @@
 
 The header rewrite is the easy half. Most of Lowbyte is the language features a target
 release cannot express, each lowered by a `FeatureTransform` in
-`src/main/kotlin/dev/iiahmed/lowbyte/transform`.
+`core/src/main/kotlin/dev/iiahmed/lowbyte/transform`.
 
 Transforms are stacked newest-feature-outermost, so whatever one emits still falls through
 the older ones beneath it. Every rewritten call site becomes a `private static synthetic`

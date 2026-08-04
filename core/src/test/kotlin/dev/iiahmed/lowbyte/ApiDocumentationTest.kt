@@ -17,7 +17,13 @@ class ApiDocumentationTest {
 
     @Test
     fun everyRewriteIsListedInApisMd() {
-        val document = File("APIs.md")
+        // Passed in rather than resolved from the working directory, which is
+        // this module rather than the repository the document sits in.
+        val document = File(
+            requireNotNull(System.getProperty("lowbyte.apisMd")) {
+                "lowbyte.apisMd is not set, so the test task is not passing APIs.md in"
+            }
+        )
         assertTrue(document.isFile, "APIs.md is not where this test expects it: ${document.absolutePath}")
         val text = document.readText().replace("()`", "`")
         val missing = ApiRewrites.ALL.map { it.name }.filterNot { "`$it`" in text }

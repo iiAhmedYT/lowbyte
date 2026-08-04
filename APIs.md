@@ -72,9 +72,9 @@ above it, so the two disagree on U+00A0, which is not whitespace, and on U+2028,
 Getting that right means a loop over code points, and writing loops as hand-emitted
 bytecode with hand-written stack frames is how mistakes happen.
 
-So those live in a small utility class, written as ordinary Java in `src/runtime`, compiled
-at `--release 8`, and carried inside the plugin. When a jar calls one of them, the class is
-copied into that jar and the call site is pointed at it.
+So those live in a small utility class, written as ordinary Java in `core/src/runtime`,
+compiled at `--release 8`, and carried inside the core jar. When a jar calls one of them,
+the class is copied into that jar and the call site is pointed at it.
 
 | Call                            | Since | Why it is here rather than inline                                       |
 |---------------------------------|-------|-------------------------------------------------------------------------|

@@ -14,6 +14,7 @@ import org.objectweb.asm.Handle
 import org.objectweb.asm.MethodVisitor
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.RecordComponentVisitor
+import java.io.File
 import java.util.zip.ZipInputStream
 import kotlin.test.fail
 
@@ -29,8 +30,23 @@ object Fixtures {
 
     private const val ROOT = "/javac21/generated"
 
-    /** Where the hand-written sources live, as a resource path. */
-    const val SOURCES = "/javac21/sources"
+    /**
+     * Where the hand-written sample sources live, as a directory on disk.
+     *
+     * A path rather than a classpath resource, unlike everything else read
+     * here. These are repo files that a test reasons about as files, and once
+     * the fixtures are packaged as a test-fixtures jar their resource URL is a
+     * `jar:` URL that no `File` can be built from. The build passes the
+     * location in instead.
+     */
+    val sourceDir: File
+        get() = File(
+            requireNotNull(System.getProperty(SOURCE_DIR_PROPERTY)) {
+                "$SOURCE_DIR_PROPERTY is not set, so the test task is not passing the fixture sources in"
+            }
+        )
+
+    private const val SOURCE_DIR_PROPERTY = "lowbyte.fixtureSources"
 
     /**
      * Every sample the differential test runs.
