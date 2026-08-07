@@ -15,7 +15,9 @@ plugins {
     `maven-publish`
 }
 
-base.archivesName = "lowbyte-core"
+// The library is the product, so it takes the plain name. The frontends are
+// what get qualified.
+base.archivesName = "lowbyte"
 
 dependencies {
     // api, not implementation: a rewrite is written against MethodVisitor, so
@@ -50,7 +52,7 @@ publishing {
     publications {
         create<MavenPublication>("maven") {
             from(components["java"])
-            artifactId = "lowbyte-core"
+            artifactId = "lowbyte"
         }
     }
     repositories {

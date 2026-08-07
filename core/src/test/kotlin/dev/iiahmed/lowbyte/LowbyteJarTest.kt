@@ -20,14 +20,9 @@ import kotlin.test.assertTrue
  * What a downgrade does to the jar rather than to a class.
  *
  * Everything else works one class at a time through
- * [dev.iiahmed.lowbyte.downgrade.ClassDowngrader]. The jar level has behaviour
- * of its own that only shows up here: entries that are not classes, the marker
- * classes a bridged constructor adds, exclusions, module descriptors, and what
- * a signed jar loses on the way through.
- *
- * These used to run through the Gradle task, which was the only thing that
- * could open a jar. Since that moved into [Lowbyte] they no longer need a build
- * tool, and testing them through one only obscured which layer they were about.
+ * [dev.iiahmed.lowbyte.downgrade.ClassDowngrader]. Only here do entries that are
+ * not classes, marker classes, exclusions, module descriptors and signed jars
+ * have anything to say.
  */
 class LowbyteJarTest {
 
